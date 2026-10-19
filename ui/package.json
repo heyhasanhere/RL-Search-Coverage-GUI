@@ -1,0 +1,31 @@
+{
+  "name": "sar-operator-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "mock": "node mock_server.mjs"
+  },
+  "dependencies": {
+    "@turf/area": "7.4.0",
+    "@turf/bbox": "7.4.0",
+    "@turf/distance": "7.4.0",
+    "maplibre-gl": "6.12.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "terra-draw": "1.36.0",
+    "terra-draw-maplibre-gl-adapter": "1.5.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "playwright": "^1.64.1",
+    "typescript": "6.0.3",
+    "vite": "8.1.6",
+    "ws": "8.22.0"
+  }
+}
