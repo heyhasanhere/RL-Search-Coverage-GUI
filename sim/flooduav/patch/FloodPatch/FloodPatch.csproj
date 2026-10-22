@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Build: dotnet build -c Release -p:Managed=<build>/FloodUAV_Data/Managed -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(Managed)/netstandard.dll" Private="false" />
+    <Reference Include="$(Managed)/mscorlib.dll" Private="false" />
+    <Reference Include="$(Managed)/UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="$(Managed)/UnityEngine.PhysicsModule.dll" Private="false" />
+    <Reference Include="$(Managed)/Unity.ML-Agents.dll" Private="false" />
+  </ItemGroup>
+</Project>
