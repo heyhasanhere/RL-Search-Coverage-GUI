@@ -5,12 +5,16 @@ Isaac bridge: sim time, video streams and a follow-view call, plus a drone state
 setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
 
   GET  /time               {"sim_time": s}
-  GET  /info               scene info: boundary, start, survivors, area polygon, map image box (mission meters)
+  GET  /info               scene info: boundary, start, survivors, area polygon, map image box, cell types
+                           (mission meters; cells: sample (i, j) sits at origin_en + i di_en + j dj_en)
   GET  /state              drone poses in mission meters, episode, found survivors
   POST /setpoint           {"drone": k, "pos": [e, n, u], "vel": [ve, vn, vu]}; "hold": true holds where it is,
                            "land": true descends and rests on the ground below
   POST /speed              {"speed": m/s} horizontal speed cap for both drones
   POST /reset              restart Unity's mission: drones back on their pads, survivors unfound
+  POST /survivors          {"seed": n, "count": k} new survivor layout of k survivors, then a reset; no seed: a
+                           random one, -1: the build's fixed survivors; no count: the build's 15.
+                           Returns once the new positions are in /info.
   POST /view               {"drone": k} follow camera target
   POST /camera             {"view": "follow", "distance", "yaw", "pitch"} or {"view": "drone", "drone": k, "fov", "pan", "tilt"}
   GET  /stream/follow      main Unity view
@@ -81,6 +85,18 @@ class Scene:
     def survivors(self):
         return {s["id"]: self.to_mission(s["local"]).tolist() for s in self.info["survivors"] if s["searchable"]}
 
+    def cells(self):
+        """Cell type samples of the patch (Layout.cs) on the mission frame, or None."""
+        c = self.info.get("cells")
+        if not c:
+            return None
+        o = np.array(c["origin"], float)
+        o0 = self.to_mission(o)
+        di = self.to_mission(o + [c["dx"], 0, 0]) - o0
+        dj = self.to_mission(o + [0, 0, c["dz"]]) - o0
+        return {"origin_en": o0[:2].tolist(), "di_en": di[:2].tolist(), "dj_en": dj[:2].tolist(),
+                "nx": c["nx"], "nz": c["nz"], "types": c["types"]}
+
     def area(self):
         lo, hi = self.lo, self.hi
         return [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]], [lo[0], lo[1]]]
@@ -147,12 +163,16 @@ class Unity:
         self.found: dict[str, list] = {}
         self.speed_cap = args.max_speed
         self.pending_reset = False
+        self.pending_layout = None
+        self.layout_done = threading.Event()
+        self.layout_sent = False
         os.environ.update({
             "FLOODUAV_HSPEED": str(args.max_speed), "FLOODUAV_VSPEED": str(args.climb),
             "FLOODUAV_TILT": str(args.tilt), "FLOODUAV_TIME_LIMIT": "1000000",
             "FLOODUAV_SPLIT": "1", "FLOODUAV_INFO": args.info, "FLOODUAV_FLEET": "1", "FLOODUAV_SOFT": "1",
             "FLOODUAV_FOLLOW": args.follow, "FLOODUAV_AIRCRAFT": f"wingArea={args.wing_area}",
-            "FLOODUAV_MAP": args.map_file,
+            "FLOODUAV_MAP": args.map_file, "FLOODUAV_SURVIVOR_SEED": str(args.survivor_seed),
+            "FLOODUAV_SURVIVOR_COUNT": str(args.survivor_count),
         })
         Path(args.info).unlink(missing_ok=True)
         ch = EngineConfigurationChannel()
@@ -251,6 +271,19 @@ class Unity:
         with self.lock:
             self.pending_reset = True
 
+    def new_layout(self, seed, count=-1, timeout=60.0) -> bool:
+        """Survivor layout `seed` with `count` survivors from the next mission start on; waits until /info has it."""
+        with self.lock:
+            self.layout_done.clear()
+            self.pending_layout = (int(seed), int(count))
+        return self.layout_done.wait(timeout)
+
+    def _reload_info(self):
+        """The patch rewrites the info file at each mission start, with the current survivor positions."""
+        info = json.loads(Path(self.args.info).read_text())
+        with self.lock:
+            self.scene.info = info
+
     def _command(self, d: Drone):
         a, sc = self.args, self.scene
         landing = d.mode == "land"
@@ -295,11 +328,21 @@ class Unity:
             with self.lock:
                 acts = [self._command(d) for d in self.drones]
                 reset, self.pending_reset = self.pending_reset, False
+                layout, self.pending_layout = self.pending_layout, None
             if reset:
                 self.env.reset()
+                self._reload_info()
                 with self.lock:
                     self.found = {}
                     self._land_all()
+                if self.layout_sent:
+                    self.layout_sent = False
+                    self.layout_done.set()
+            if layout is not None:
+                # Unity takes the layout with this step; the mission restarts with it on the next one
+                self.fleet.send([6, *layout])
+                with self.lock:
+                    self.layout_sent, self.pending_reset = True, True
             self.env.set_actions(self.name, ActionTuple(continuous=np.clip(np.array([acts[0]], np.float32), -1, 1)))
             if len(acts) > 1:
                 self.fleet.send([1, *acts[1]])
@@ -404,6 +447,9 @@ def make_handler(unity: Unity, grab: Grabber, args):
                                    "homes": [d.home.round(2).tolist() for d in unity.drones],
                                    "camera_fov": sc.info.get("camera_fov", 60.0),
                                    "survivors": [{"id": k, "e": v[0], "n": v[1]} for k, v in sc.survivors().items()],
+                                   "kinds": {s["id"]: s.get("kind", "fixed") for s in sc.info["survivors"]},
+                                   "cells": sc.cells(),
+                                   "survivor_seed": sc.info.get("survivor_seed", -1),
                                    "limits": {"lo": sc.lo.tolist(), "hi": sc.hi.tolist()},
                                    "min_alt": args.min_alt, "max_speed": args.max_speed})
             if path == "/map.jpg":
@@ -465,6 +511,12 @@ def make_handler(unity: Unity, grab: Grabber, args):
             if self.path == "/reset":
                 unity.reset()
                 return self._json({"ok": True})
+            if self.path == "/survivors":
+                seed = msg.get("seed")
+                seed = int(np.random.default_rng().integers(0, 1 << 24)) if seed is None else int(seed)
+                if not unity.new_layout(seed, int(msg.get("count", -1))):
+                    return self._json({"error": "Unity did not restart with the new layout"}, 504)
+                return self._json({"ok": True, "seed": seed, "count": len(sc.survivors())})
             if self.path == "/view":
                 unity.view(int(msg.get("drone", 0)))
                 return self._json({"ok": True})
@@ -504,6 +556,10 @@ def main():
     ap.add_argument("--info", default="/tmp/flooduav_info.json")
     ap.add_argument("--unity-log", default="/tmp/flooduav_unity.log")
     ap.add_argument("--map-file", default="/tmp/flooduav_map.jpg", help="where Unity writes the map render")
+    ap.add_argument("--survivor-seed", type=int, default=-1,
+                    help="survivor layout seed at startup; -1 keeps the build's fixed survivors (patch Layout.cs)")
+    ap.add_argument("--survivor-count", type=int, default=-1,
+                    help="number of survivors (1-100); -1 keeps the build's 15; more than 15 needs --survivor-seed")
     ap.add_argument("--map-px", type=int, default=4096, help="map render size, pixels per side")
     args = ap.parse_args()
 

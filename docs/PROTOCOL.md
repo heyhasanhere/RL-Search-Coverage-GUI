@@ -40,6 +40,7 @@ rendered once by Unity at high resolution (`<bridge>/map.jpg`, 4096 px by defaul
   "backend": "kinematic | flooduav",
   "detector": "sim",
   "bridge": false,
+  "survivor_layouts": false,
   "scenarios": ["wilderness", "flood"]
 }
 ```
@@ -58,6 +59,7 @@ supported search modes; the UI shows exactly this list.
   "speed": 1.0,
   "mission": {
     "status": "idle | running | finished",
+    "stopping": false,
     "mode": "rl",
     "polygon": [[lon, lat], ...],
     "lkp": [lon, lat] | null,
@@ -114,7 +116,7 @@ The four extra drone fields are optional and older clients ignore them.
 ```
 
 `corners` are top-left, top-right, bottom-right, bottom-left, the order a MapLibre image source expects.
-The belief PNG is a heatmap (transparent outside the area); the coverage PNG marks looked-at cells.
+The belief PNG is a heatmap (transparent outside the area); the coverage PNG marks looked-at cells. Every airborne drone at search height or above looks at the cell below it, also on rescue, return and staging flights, and a look there counts as a search look.
 
 ### 3.3 `prior` (once per mission)
 
@@ -163,8 +165,10 @@ Later missions send it again.
 |---|---|---|
 | `start_mission` | `polygon` ([lon, lat] ring), `lkp` (optional), `mode`, `n_search` (1-3), `expected_survivors`, `options`, `scenario`, `lkp_time_h`, `water_level_m`, `regions` | Builds the grid and prior, launches the search drones |
 | `stop_mission` | - | All drones return home |
+| `continue_mission` | - | Resumes a stopped or finished mission: belief, coverage and survivors are kept, the search drones take off again. Batteries are not recharged |
 | `restart_mission` | - | Resets the world and starts the last mission again |
 | `reset_mission` | - | Resets the world to before the start and does not start: drones on their pads, batteries full, survivors cleared, survivor numbers start again at 1 |
+| `new_survivors` | `count` (1-100, optional, default the build's 15) | FloodUAV only (`survivor_layouts` in the config): `reset_mission`, then `count` survivors at new random positions in Unity. Later resets keep them. An event names the count and the layout seed |
 | `set_mode` | `mode` | Changes the search mode mid-mission |
 | `recall` | `drone` | Drone returns home (RETURNING) |
 | `standby` | `drone`, `point` ([lon, lat], optional, default home) | Drone parks at the point (STANDBY) |

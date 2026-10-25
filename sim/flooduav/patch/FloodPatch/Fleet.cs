@@ -9,6 +9,7 @@
 //   [4, 0, distance, yaw, pitch]            follow camera offset: distance (m), yaw from behind, pitch above (deg)
 //   [4, 1 + k, fov, pan, tilt]              drone camera k: field of view, pan sideways, tilt from straight down (deg)
 //   [5, size]                               write a size x size top-down map to FLOODUAV_MAP
+//   [6, seed, count]                        survivor layout for the next mission start (Layout.cs; -1: the build's)
 // Unity to bridge, every decision step (5 physics steps):
 //   [pos x, y, z normalized in the boundary, velocity x, y, z in the boundary frame (m/s),
 //    heading sin, cos (from boundary forward, clockwise), nearest of 8 horizontal rays / 30 m,
@@ -129,6 +130,8 @@ namespace FloodPatch
             }
             else if (kind == 5 && v.Count >= 2)
                 Hook.RenderMap(Mathf.RoundToInt(v[1]));
+            else if (kind == 6 && v.Count >= 3)
+                Layout.Set(Mathf.RoundToInt(v[1]), Mathf.RoundToInt(v[2]));
         }
 
         void FixedUpdate()

@@ -15,11 +15,14 @@ Open `http://<host>:8001`. The search area is preset to the Unity boundary, and 
 Press Start (scenario `flood`). Logs are in `runs/flooduav_ui/`, and the mission log is `runs/mission/flooduav_ui.jsonl`.
 Run `down` in its own SSH call: its `pkill` patterns can match a command line that contains them.
 
+Operator password: put `SAR_CONTROL_PASSWORD=...` in `~/.config/sar-search/control.env` (or the file named by `SAR_ENV_FILE`) before `up`.
+With it set, anyone can watch and only a browser logged in with the password (status bar, Log in) can send commands.
+
 ## Parts
 
 | Part | File | Role |
 |---|---|---|
-| Patch | `patch/FloodPatch/Hook.cs`, `patch/Injector/`, `patch/build.sh` | Hard-linked copy of the build at `unity/SearchPickupPatched` with hooks injected (Mono.Cecil) |
+| Patch | `patch/FloodPatch/Hook.cs`, `Layout.cs`, `patch/Injector/`, `patch/build.sh` | Hard-linked copy of the build at `unity/SearchPickupPatched` with hooks injected (Mono.Cecil) |
 | Fleet | `patch/FloodPatch/Fleet.cs` | Takes over the build's pickup drone (pilot and coordinator off) and flies it from a side channel |
 | Bridge | `bridge.py` (`.venv-fly`) | Steps Unity, flies both drones to setpoints, lands them, streams the screen regions as MJPEG |
 | Backend | `sar/mission/flooduav.py`, `server.py --backend flooduav` | Two drones (D1 search drone, D2 pickup drone); Unity's finds and D2's camera footprint become detections |
@@ -30,6 +33,7 @@ The patch reads environment variables at mission start:
 - It removes the time limit and sets `runInBackground`.
 - It splits the screen (2640x720): follow view (left), D1 and D2 cameras (middle, straight down) and a square overview (right).
 - It turns contact failures off (`FLOODUAV_SOFT`) so drones can land, and sets the follow camera offset (`FLOODUAV_FOLLOW`, default 0,30,-30: about 45 degrees down).
+- It places the survivors (`FLOODUAV_SURVIVOR_SEED`, see Survivor positions below).
 - It writes the boundary, start point and survivor positions to a JSON file.
 
 Unity renders with Vulkan on the NVIDIA GPU (`-force-vulkan`); OpenGL under Xvfb falls back to llvmpipe at about 3 fps.
@@ -42,10 +46,30 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - Landing is real: the drone descends straight down and keeps pushing down on the ground. Over open water (no ground within 150 m) it hovers instead.
 - Unity's visibility sensor confirms survivors up to 150 m away. The detector reports each found survivor near the drone, so the re-look confirms it.
 - If Unity ends its mission (collision or leaving the boundary), the drone resets to the start and the UI logs a warning.
-- Two drones under our control, 15 fixed survivors. D2 has no sensor in the build: it detects survivors inside its camera footprint.
-- Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. Speed cap: `POST /speed`. Follow target: `POST /view`.
+- Two drones under our control, 15 survivors by default (1-100, see Survivor positions). D2 has no sensor in the build: it detects survivors inside its camera footprint.
+- Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. It keeps the survivor positions. Speed cap: `POST /speed`. Follow target: `POST /view`.
 - Camera zoom and angle: `POST /camera` with `{"view": "follow", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
 - The build's mission map goes to a second display, which Xvfb does not have.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.
 - Replay of a FloodUAV mission draws the tracks on a plain map: the log does not keep the Unity top-down image or the search area outline.
+
+## Survivor positions
+
+The build has 15 fixed survivors. The patch (`patch/FloodPatch/Layout.cs`) can move them to random positions drawn from a seed.
+
+- The UI button New survivors (or `POST /survivors` on the bridge) resets the mission and makes a new random layout. Reset and Restart keep it.
+- Survivors in map (next to Expected survivors) sets how many survivors New survivors places, 1-100. Fewer than 15 hides some of the build's survivors; more adds copies of its first survivor (`Survivor_016` and on).
+- The same seed gives the same layout. Start with one: `sim/flooduav/run.sh up --survivor-seed 7 --survivor-count 30`. The defaults `-1` keep the build's 15 survivors. With the build's layout the count can only go down.
+- Survivors stand only on dry surfaces at least 0.5 m above the water plane, at least 10 m apart and 25 m from the drone pads.
+
+The layout follows the flood survivor model of `sar/prior/flood.py` without its water component:
+
+| Kind | Share | Where |
+|---|---|---|
+| Roof | 0.60 / 0.85 = 71% | Top of a structure at least 2.5 m above the ground, standing in the flood or within 30 m of it (house roofs, bridges) |
+| High ground | 0.25 / 0.85 = 29% | Dry ground, weight `exp(-d^2 / (2 * 90^2))` by the distance `d` to the flood, none beyond 240 m, doubled on dry islands |
+
+The shares are hand-set, as in the flood prior: there is no case data to fit them.
+`GET /info` reports the layout seed (`survivor_seed`); the patch's info file also gives each survivor's kind.
+

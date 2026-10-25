@@ -26,6 +26,7 @@ from sar.mission.search_policy_v2 import MODES_V2, get_policy_v2
 from sar.mission.vehicle import SimClock, Vehicle
 
 AIRBORNE = ("SEARCH", "RESCUE_TRANSIT", "ON_SURVIVOR", "RETURNING", "ABORT")
+TRANSIT_LOOKS = ("RESCUE_TRANSIT", "ON_SURVIVOR", "RETURNING", "STANDBY")   # non-search flights whose camera counts
 STOP_FRACTION = 0.02          # search ends when this fraction of the prior remains
 LEAD_SPEED = 3.0              # m/s the carrot may run ahead of the drone's speed along the leg
 
@@ -116,6 +117,7 @@ class Orchestrator:
         self.metrics = {"looks": 0, "relooks": 0, "false_dispatch": 0}
         self.last_start: dict | None = None      # start_mission arguments, for restart
         self.on_restart = None                   # optional async callback: reset the sim world
+        self.on_new_survivors = None             # optional async callback(count): new survivor layout, returns (seed, count)
         self.drone_speed: float | None = None    # operator speed cap, m/s; None: vehicle default
 
     # ---------------------------------------------------------------- basics
@@ -306,6 +308,24 @@ class Orchestrator:
                 self._set_task(d, self._return(d, reason), "RETURNING", reason)
         self.event(f"mission stopping: {reason}")
 
+    def continue_mission(self):
+        """Resume a stopped or finished mission: belief, coverage and survivors are kept, search drones go back up."""
+        m = self.mission
+        if not m or (m.status == "running" and not m.stopping):
+            raise ValueError("no stopped mission to continue")
+        m.status, m.stopping = "running", False
+        n_search = int(self.last_start["n_search"]) if self.last_start else 2
+        free = [d for d in self.drones if d.state != "ABORT"]
+        searchers = ([d for d in free if d.role == "search"] + [d for d in free if d.role != "search"])[:n_search]
+        for d in self.drones:
+            if d in searchers:
+                self._set_task(d, self._search(d), "SEARCH", "continuing")
+            elif d.state in ("IDLE", "LANDED"):
+                d.standby_point = d.vehicle.home[:2].copy()
+                d.state, d.task_text = "STANDBY", "landed at home"
+        self.event(f"mission continued: {len(searchers)} search drones")
+        self.log("continued", searchers=[d.id for d in searchers])
+
     async def restart_mission(self):
         """Start the last mission again from scratch: tasks dropped, batteries full, drones on their pads."""
         if self.last_start is None:
@@ -321,6 +341,16 @@ class Orchestrator:
         self.survivors.clear()
         self._next_sid = 1
         self.event("mission reset")
+
+    async def new_survivors(self, count=None):
+        """Reset, then `count` survivors at new random positions (scene backends with a survivor layout)."""
+        if self.on_new_survivors is None:
+            raise ValueError("this backend has no survivor layouts")
+        if count is not None and not 1 <= int(count) <= 100:
+            raise ValueError("survivor count must be 1-100")
+        await self.reset_mission()
+        seed, n = await self.on_new_survivors(count)
+        self.event(f"new survivor positions: {n} survivors (seed {seed})")
 
     async def _reset_world(self):
         tasks = [d.task for d in self.drones if d.task and not d.task.done()]
@@ -855,8 +885,10 @@ class Orchestrator:
                     if was_search:
                         self._replace(d)
                     continue
-            # looks from the actual position
-            if m and d.state == "SEARCH" and d.plan_cell is not None and self._pos_agl(d)[2] > cfg.search_alt - 3:
+            # looks from the actual position; transit flights (rescue, return, staging) look too, as a search look
+            searching = d.state == "SEARCH" and d.plan_cell is not None
+            transit = d.state in TRANSIT_LOOKS and tel.in_air
+            if m and (searching or transit) and self._pos_agl(d)[2] > cfg.search_alt - 3:
                 cell = self.drone_cell(d)
                 if cell != d.last_cell:
                     d.last_cell = cell
@@ -890,11 +922,15 @@ class Orchestrator:
             self._publish(self.prior_msg())
         elif kind == "stop_mission":
             self.stop_mission()
+        elif kind == "continue_mission":
+            self.continue_mission()
         elif kind == "restart_mission":
             await self.restart_mission()
             self._publish(self.prior_msg())
         elif kind == "reset_mission":
             await self.reset_mission()
+        elif kind == "new_survivors":
+            await self.new_survivors(msg.get("count"))
         elif kind == "recharge":
             self.recharge(d)
         elif kind == "set_drone_speed":
@@ -1018,7 +1054,7 @@ class Orchestrator:
         if m:
             inside = m.grid.mask
             mission = {
-                "status": m.status, "mode": m.mode, "polygon": m.polygon, "lkp": m.lkp,
+                "status": m.status, "stopping": m.stopping, "mode": m.mode, "polygon": m.polygon, "lkp": m.lkp,
                 "expected_total": m.expected,
                 "remaining_fraction": round(float(m.belief.sum() / max(m.belief0, 1e-9)), 4),
                 "expected_found": round(self.expected_found(), 3),

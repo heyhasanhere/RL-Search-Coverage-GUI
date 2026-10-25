@@ -29,8 +29,6 @@ interface Props {
   showBelief: boolean;
   showCoverage: boolean;
   showTruth: boolean;
-  /** Map background: the static scene image (false) or the live top-down frame (true). */
-  overview?: boolean;
   /** Keys of the prior layers to overlay; "blend" is the combined map. */
   showPrior: Set<string>;
   drawLocked: boolean;
@@ -48,6 +46,8 @@ interface Props {
   onSelectSurvivor: (sid: number) => void;
   /** Replay: zoom to this polygon whenever it changes. */
   fitTo?: LonLat[] | null;
+  /** Keep the draw bar open: there is no search area yet. */
+  needArea?: boolean;
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -119,7 +119,6 @@ function syncMarkers<T extends { id: number; pos: LonLat }>(
 
 export default function MapView(props: Props) {
   const { config, state, belief, prior, base, showBelief, showCoverage, showTruth, showPrior, drawLocked, picking } = props;
-  const overview = props.overview ?? false;
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const drawRef = useRef<TerraDraw | null>(null);
@@ -294,25 +293,6 @@ export default function MapView(props: Props) {
     map.setLayoutProperty("osm", "visibility", base === "osm" ? "visible" : "none");
   }, [ready, base]);
 
-  // Overview: the scene image follows the live top-down frame, about once a second.
-  useEffect(() => {
-    const map = mapRef.current;
-    const img = config.map_image;
-    if (!ready || !map || !img) return;
-    const src = map.getSource("scene") as ImageSource | undefined;
-    if (!src) return;
-    const coordinates = img.coordinates as [LonLat, LonLat, LonLat, LonLat];
-    if (!overview || !img.live_url) {
-      src.updateImage({ url: img.url, coordinates });
-      return;
-    }
-    const live = img.live_url;
-    const tick = () => src.updateImage({ url: `${live}?t=${Date.now()}`, coordinates });
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, [ready, overview, config.map_image]);
-
   // Belief and coverage image sources.
   useEffect(() => {
     const map = mapRef.current;
@@ -456,7 +436,10 @@ export default function MapView(props: Props) {
   return (
     <div className="map-wrap">
       <div ref={container} className="map" />
-      <div className="draw-bar">
+      {/* Collapsed to its title unless hovered, a draw tool is active or no area is set; hidden while drawing is locked. */}
+      {!drawLocked && (
+      <div className={`draw-bar autohide${props.needArea || tool !== "select" ? " open" : ""}`}>
+        <span className="autohide-title">Draw</span>
         {tools.map(([t, label]) => (
           <button key={t} className={tool === t ? "active" : ""} disabled={drawLocked} onClick={() => props.onToolChange(t)}>
             {label}
@@ -472,6 +455,7 @@ export default function MapView(props: Props) {
           Clear
         </button>
       </div>
+      )}
       {picking && <div className="pick-hint">Click the map to place the standby point</div>}
     </div>
   );

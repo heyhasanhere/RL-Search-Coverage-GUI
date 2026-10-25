@@ -15,6 +15,8 @@
 //   FLOODUAV_FLEET     1: the pickup drone becomes a second drone the bridge flies (Fleet.cs)
 //   FLOODUAV_SOFT      1: contact with the ground or buildings no longer ends the mission, so drones can land
 //   FLOODUAV_MAP       path the high resolution top-down map is written to (JPEG, Fleet message 5)
+//   FLOODUAV_SURVIVOR_SEED  survivor layout seed (Layout.cs; default -1: the build's fixed survivors)
+//   FLOODUAV_SURVIVOR_COUNT number of survivors (Layout.cs; default -1: the build's 15)
 
 using System;
 using System.Collections;
@@ -31,6 +33,7 @@ namespace FloodPatch
         const BindingFlags F = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
         static bool viewsReady;
         static MonoBehaviour pickup;
+        static Vector3[] pads;
         // the on-screen drone cameras (0 search drone, 1 pickup drone), their straight-down pose, and the overview
         static readonly Camera[] droneCams = new Camera[2];
         static readonly Quaternion[] camBase = new Quaternion[2];
@@ -104,6 +107,9 @@ namespace FloodPatch
                 if (!viewsReady)
                 {
                     pickup = FindPickup(mission);
+                    // both drones still sit on their pads at the first mission start
+                    pads = new[] { ((Transform)Get(mission, "droneStartPoint")).position,
+                                   pickup != null ? pickup.transform.position : ((Transform)Get(mission, "droneStartPoint")).position };
                     if (Env("FLOODUAV_SOFT", 0f) > 0.5f)
                         Soften(mission);
                     if (pickup != null && Env("FLOODUAV_FLEET", 0f) > 0.5f)
@@ -115,6 +121,7 @@ namespace FloodPatch
                 viewsReady = true;
                 if (Fleet.Instance != null)
                     Fleet.Instance.ResetPickup();
+                Layout.Apply(mission, pads);
                 string path = Environment.GetEnvironmentVariable("FLOODUAV_INFO");
                 if (!string.IsNullOrEmpty(path))
                     File.WriteAllText(path, Info(mission));
@@ -287,6 +294,8 @@ namespace FloodPatch
             object sensor = Get(mission, "visibilitySensor");
             Camera search = sensor == null ? null : Get(sensor, "searchCamera") as Camera;
             sb.Append(",\"camera_fov\":").Append((search == null ? 60f : search.fieldOfView).ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"cells\":").Append(Layout.CellsJson());
+            sb.Append(",\"survivor_seed\":").Append(Layout.Seed.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"survivors\":[");
             bool first = true;
             foreach (MonoBehaviour m in root.GetComponentsInChildren<MonoBehaviour>(true))
@@ -297,6 +306,7 @@ namespace FloodPatch
                 PropertyInfo ok = m.GetType().GetProperty("IsSearchable");
                 sb.Append(first ? "" : ",").Append("{\"id\":\"").Append(id.GetValue(m, null)).Append("\"")
                   .Append(",\"local\":").Append(V(t.InverseTransformPoint(m.transform.position)))
+                  .Append(",\"kind\":\"").Append(Layout.Kind(m)).Append("\"")
                   .Append(",\"searchable\":").Append((bool)ok.GetValue(m, null) ? "true" : "false").Append("}");
                 first = false;
             }

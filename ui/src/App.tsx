@@ -10,6 +10,7 @@ import VideoPanel from "./VideoPanel";
 import PriorPanel from "./PriorPanel";
 import RecordedVideo from "./RecordedVideo";
 import ReplayControls from "./ReplayControls";
+import OperatorLogin from "./OperatorLogin";
 import { useCameraViews } from "./useCameraViews";
 import { replayBeliefAt, replayEventsAt, replayPrior, replayStateAt } from "./replayState";
 import type { LonLat, Region } from "./types";
@@ -65,8 +66,6 @@ export default function App() {
   const [showPrior, setShowPrior] = useState<Set<string>>(new Set());
   const [selectedDrone, setSelectedDrone] = useState<number | null>(null);
   const [selectedSurvivor, setSelectedSurvivor] = useState<number | null>(null);
-  // Map panel background: the scene map or the live top-down overview (scene backends only).
-  const [mapMode, setMapMode] = useState<"map" | "overview">("map");
 
   // ---------------------------------------------------------------- replay
   // One recorded mission shown in the live layout: the panels get the state,
@@ -226,6 +225,7 @@ export default function App() {
           ) : (
             <span className={`conn ${connected ? "on" : "off"}`}>{connected ? "connected" : "reconnecting"}</span>
           )}
+          {!isReplay && config?.login_required && <OperatorLogin live={live} />}
         </div>
         <span>Scenario <b>{scenario}</b></span>
         <span>Mission <b>{mission?.status ?? "-"}</b></span>
@@ -302,12 +302,12 @@ export default function App() {
                 belief={belief}
                 prior={prior}
                 base={base}
-                showBelief={showBelief && mapMode === "map"}
-                showCoverage={showCoverage && mapMode === "map"}
-                overview={mapMode === "overview"}
+                showBelief={showBelief}
+                showCoverage={showCoverage}
                 showTruth={showTruth}
                 showPrior={showPrior}
                 drawLocked={running || isReplay}
+                needArea={!polygon}
                 fitTo={isReplay ? rec?.meta.polygon : null}
                 picking={pickingFor != null}
                 selectedDrone={selectedDrone}
@@ -321,13 +321,6 @@ export default function App() {
               />
             ) : (
               <div className="panel muted">Loading /api/config ...</div>
-            )}
-            {config?.map_image && !isReplay && (
-              <div className="view-toggle map-toggle">
-                <button className={mapMode === "map" ? "active" : ""} onClick={() => setMapMode("map")}>Map</button>
-                <button className={mapMode === "overview" ? "active" : ""} onClick={() => setMapMode("overview")}
-                  title="Live top-down view of the scene">Overview</button>
-              </div>
             )}
             <PriorPanel prior={prior} show={showPrior} onToggle={togglePrior} />
           </div>

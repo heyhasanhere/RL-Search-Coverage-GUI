@@ -9,7 +9,7 @@ import pytest
 from sar.config import MissionConfig
 from sar.mission.detect import SimDetector
 from sar.mission.geo import AreaGrid, Frame, koester_prior
-from sar.mission.orchestrator import Orchestrator
+from sar.mission.orchestrator import Orchestrator, Survivor
 from sar.mission.vehicle import KinematicVehicle, SimClock
 
 SPEED = 100.0
@@ -94,6 +94,71 @@ def test_reset_numbers_survivors_from_one():
         orch.start_mission(**start)
         assert await run_until(orch, lambda: orch.survivors, 300)
         assert min(orch.survivors) == 1
+        await orch.shutdown()
+    asyncio.run(main())
+
+def test_new_survivors_resets_then_lays_out():
+    async def main():
+        orch = make(fp=1.0)
+        await orch.start()
+        calls = []
+
+        async def layout(count):
+            calls.append((orch.mission, count))         # reset_mission ran first
+            return 42, count
+        with pytest.raises(ValueError):           # the kinematic backend has no layouts
+            await orch.command({"type": "new_survivors"})
+        orch.on_new_survivors = layout
+        orch.start_mission(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
+        assert await run_until(orch, lambda: orch.survivors, 300)
+        await orch.command({"type": "new_survivors", "count": 30})
+        assert calls == [(None, 30)] and orch.mission is None and not orch.survivors
+        with pytest.raises(ValueError):
+            await orch.command({"type": "new_survivors", "count": 0})
+        assert all(d.state == "IDLE" and not d.vehicle.tel.in_air for d in orch.drones)
+        await orch.shutdown()
+    asyncio.run(main())
+
+def test_continue_keeps_search_state():
+    async def main():
+        orch = make(fp=1.0)
+        await orch.start()
+        with pytest.raises(ValueError):
+            await orch.command({"type": "continue_mission"})
+        orch.start_mission(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
+        assert await run_until(orch, lambda: orch.survivors and orch.metrics["looks"] > 20, 300)
+        with pytest.raises(ValueError):           # still running
+            await orch.command({"type": "continue_mission"})
+        await orch.command({"type": "stop_mission"})
+        assert await run_until(orch, lambda: orch.mission.status == "finished", 600)
+        m, looks, found = orch.mission, orch.mission.looks.copy(), set(orch.survivors)
+        await orch.command({"type": "continue_mission"})
+        assert orch.mission is m and m.status == "running" and not m.stopping
+        assert found <= set(orch.survivors) and (m.looks >= looks).all()
+        assert [d.state for d in orch.drones[:2]] == ["SEARCH", "SEARCH"]
+        assert await run_until(orch, lambda: m.looks.sum() > looks.sum(), 300)
+        await orch.shutdown()
+    asyncio.run(main())
+
+def test_rescue_flight_looks_and_detects():
+    async def main():
+        orch = make(roles=("search", "rescue"), pd=1.0)
+        await orch.start()
+        truth = np.array([[150.0, 150.0]])              # on the rescue drone's way to the dispatched survivor
+        orch.start_mission(polygon=square(), mode="lawnmower", n_search=1, expected_survivors=1, truth_en=truth)
+        seen = []
+        on_detection = orch._on_detection
+
+        def record(d, det, viewpoint):
+            seen.append((d.id, d.state, det.e, det.n))
+            on_detection(d, det, viewpoint)
+        orch._on_detection = record
+        far = Survivor(orch._next_sid, 300.0, 300.0, 0.9, orch.t_mission(), status="confirmed")
+        orch._next_sid += 1
+        orch.survivors[far.id] = far
+        await orch.command({"type": "dispatch", "drone": 1, "survivor": far.id})
+        assert await run_until(orch, lambda: far.status == "reached", 600)
+        assert any(i == 1 and st == "RESCUE_TRANSIT" and math.hypot(e - 150, n - 150) < 10 for i, st, e, n in seen)
         await orch.shutdown()
     asyncio.run(main())
 

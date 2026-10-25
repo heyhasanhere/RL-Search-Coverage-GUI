@@ -19,10 +19,16 @@ export interface Config {
   /** v2: true when the server has a sim bridge, so the video panels can stream. */
   bridge?: boolean;
   scenarios?: string[];
+  /** FloodUAV: the server can place the survivors at new random positions (`new_survivors`). */
+  survivor_layouts?: boolean;
   /** FloodUAV: the scene boundary, preset as the search area. */
   area?: LonLat[];
   /** FloodUAV: top-down render of the scene, drawn under everything else (corners TL, TR, BR, BL). */
-  map_image?: { url: string; coordinates: LonLat[]; /** current top-down frame, for the map's Overview mode */ live_url?: string };
+  map_image?: { url: string; coordinates: LonLat[] };
+  /** Public deployment: commands need the operator password (`POST /api/login`). */
+  login_required?: boolean;
+  /** This browser holds the operator login cookie, or no login is required. */
+  operator?: boolean;
 }
 
 export type DroneState =
@@ -77,6 +83,8 @@ export interface Options {
 
 export interface Mission {
   status: "idle" | "running" | "finished";
+  /** Stop was pressed (or no drone is searching): drones are flying home. */
+  stopping?: boolean;
   mode: string;
   polygon: LonLat[];
   lkp: LonLat | null;
@@ -292,9 +300,12 @@ export type ClientMsg =
     }
   | { type: "stop_mission" }
   /** Start the last mission again: drones back on their pads, batteries full. */
+  | { type: "continue_mission" }
   | { type: "restart_mission" }
   /** Back to before the first start: no mission, drones on their pads, batteries full. Nothing starts. */
   | { type: "reset_mission" }
+  /** FloodUAV: Reset, then `count` survivors (1-100, default the build's 15) at new random positions; later Resets keep them. */
+  | { type: "new_survivors"; count?: number }
   /** Full battery for a landed drone. */
   | { type: "recharge"; drone: number }
   /** Horizontal speed cap for all drones, m/s. */

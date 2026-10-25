@@ -24,6 +24,9 @@ export DISPLAY=$DISP PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 nohup .venv-fly/bin/python -u sim/flooduav/bridge.py --port $BPORT --unity-log $PWD/$LOG/unity.log "${@:2}" >$LOG/bridge.log 2>&1 &
 for i in $(seq 120); do curl -sf localhost:$BPORT/time >/dev/null && break; sleep 2; done
 curl -sf localhost:$BPORT/time >/dev/null || { echo "bridge did not start, see $LOG/bridge.log"; exit 1; }
+# Public deployment: the operator password (SAR_CONTROL_PASSWORD=...) lives outside the project
+ENV_FILE=${SAR_ENV_FILE:-$HOME/.config/sar-search/control.env}
+[ -f "$ENV_FILE" ] && { set -a; . "$ENV_FILE"; set +a; }
 # JAX on its own GPU without preallocation: GPU 0 stays free for Unity
 CUDA_VISIBLE_DEVICES=${FLOODUAV_GPU:-1} XLA_PYTHON_CLIENT_PREALLOCATE=false \
 nohup uv run --no-sync --extra mission python -W ignore -m sar.mission.server --backend flooduav \

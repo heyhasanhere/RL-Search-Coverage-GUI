@@ -9,7 +9,10 @@ Protocol: docs/PROTOCOL.md.
 import argparse
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
+import os
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -90,6 +93,21 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
         orch.truth_en = truth
         return FloodDetector(vehicles, truth)
 
+    async def new_survivors(count=None):
+        """New random survivor positions in Unity (`count` survivors, None: the build's 15); returns seed and count."""
+        nonlocal truth
+        import httpx
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            r = await client.post(f"{args.bridge_url}/survivors", json={} if count is None else {"count": int(count)})
+            r.raise_for_status()
+            new = (await client.get(f"{args.bridge_url}/info")).json()
+        for v in vehicles:
+            v.landed = True
+        truth = np.array([[s["e"], s["n"]] for s in new["survivors"]], float)
+        orch.truth_en, orch.flood_info = truth, new
+        await clock.sleep(3.0)       # the drones settle on their pads after Unity's restart
+        return r.json()["seed"], len(truth)
+
     async def restart():
         import httpx
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -108,6 +126,9 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     orch.flood_info = info
     orch.truth_en = truth          # Unity's survivors are known from the start, so truth shows before a mission
     orch.on_restart = restart
+    orch.on_new_survivors = new_survivors
+    from sar.prior.flood_bank import make_cells_builder
+    orch.prior_builder = make_cells_builder(lambda: orch.flood_info)
     for v in vehicles:
         v.on_reset = lambda reason: orch.event(f"Unity mission ended ({reason}); drones reset to their pads", "warn")
     return orch
@@ -120,8 +141,11 @@ def flood_extras(orch) -> dict:
         return {}
     ll = lambda p: [round(float(v), 7) for v in orch.lonlat(p[0], p[1])]  # noqa: E731
     return {"area": [ll(p) for p in info["area_en"]],
-            "map_image": {"url": "api/flood_overview.jpg", "live_url": "api/flood_overview_live.jpg",
+            "map_image": {"url": "api/flood_overview.jpg",
                           "coordinates": [ll(p) for p in info["overview_en"]]}}
+
+
+COOKIE = "sar_control"
 
 
 def make_app(args, orch: Orchestrator) -> FastAPI:
@@ -138,8 +162,32 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan)
 
+    # Operator login (public deployment): with a password set, anyone may watch,
+    # but only a browser holding the login cookie may send commands.
+    password = args.control_password or os.environ.get("SAR_CONTROL_PASSWORD", "")
+    token = hmac.new(password.encode(), b"sar-control", hashlib.sha256).hexdigest() if password else ""
+
+    def is_operator(cookies) -> bool:
+        return not token or hmac.compare_digest(cookies.get(COOKIE, ""), token)
+
+    @app.post("/api/login")
+    async def login(request: Request):
+        body = await request.json()
+        if not token or not hmac.compare_digest(str(body.get("password", "")).encode(), password.encode()):
+            return JSONResponse({"error": "wrong password"}, status_code=403)
+        r = JSONResponse({"ok": True})
+        secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+        r.set_cookie(COOKIE, token, max_age=7 * 86400, httponly=True, samesite="lax", secure=secure)
+        return r
+
+    @app.post("/api/logout")
+    def logout():
+        r = JSONResponse({"ok": True})
+        r.delete_cookie(COOKIE)
+        return r
+
     @app.get("/api/config")
-    def config():
+    def config(request: Request):
         side = cfg.grid * cfg.cell_m
         return {
             "home": list(cfg.home), "cell_m": cfg.cell_m, "max_grid": cfg.grid,
@@ -147,8 +195,10 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
             "drones": [{"id": d.id, "name": d.name, "role": d.role} for d in orch.drones],
             "backend": args.backend, "detector": args.detector,
             "bridge": bool(bridge),
+            "survivor_layouts": orch.on_new_survivors is not None,
             "scenarios": list(getattr(orch, "scenarios", ("wilderness", "flood"))),
             **flood_extras(orch),
+            "login_required": bool(token), "operator": is_operator(request.cookies),
         }
 
     overview: dict = {}
@@ -166,16 +216,6 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
                 return JSONResponse({"error": "no overview frame"}, status_code=503)
             overview["jpg"] = r.content
         return Response(overview["jpg"], media_type="image/jpeg")
-
-    @app.get("/api/flood_overview_live.jpg")
-    async def flood_overview_live():
-        """The current top-down frame: the map's Overview mode refreshes it about once a second."""
-        import httpx
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f"{bridge}/overview.jpg")
-        if r.status_code != 200:
-            return JSONResponse({"error": "no overview frame"}, status_code=503)
-        return Response(r.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     # The mission log clock (the `t` of every log row); scripts/replay_record.py
     # stamps each recorded video frame with it.
@@ -249,6 +289,7 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
         await sock.accept()
+        operator = is_operator(sock.cookies)
         q: asyncio.Queue = asyncio.Queue()
         orch.subscribers.append(q)
 
@@ -269,6 +310,10 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         try:
             while True:
                 msg = json.loads(await sock.receive_text())
+                if not operator:
+                    await sock.send_text(json.dumps({"type": "event", "t": round(orch.t_mission(), 1),
+                                                     "level": "warn", "text": "Viewer mode: log in to control"}))
+                    continue
                 if msg.get("type") == "camera":
                     await _camera(msg)
                     continue
@@ -340,6 +385,8 @@ def parser():
     ap.add_argument("--log", default=str(ROOT / "runs/mission/mission.jsonl"))
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--control-password", default="",
+                    help="operator password; viewers without it can only watch (default: $SAR_CONTROL_PASSWORD)")
     return ap
 
 

@@ -50,6 +50,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const nDrones = Math.max(config.drones.length, 1);
   const [nSearch, setNSearch] = useState(Math.min(2, nDrones));
   const [expected, setExpected] = useState(3);
+  const [spawn, setSpawn] = useState(15);
   const [lkpTimeH, setLkpTimeH] = useState(6);
   const [waterLevel, setWaterLevel] = useState(10.5);   // m above the normal river; floods the demo town
   const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false });
@@ -58,6 +59,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const shownSpeed = droneSpeed ?? state?.drone_speed ?? 10;
   const sendDroneSpeed = () => send({ type: "set_drone_speed", speed: shownSpeed });
   const hasMission = !!state && state.mission.status !== "idle";
+  const stopped = hasMission && (state.mission.status === "finished" || !!state.mission.stopping);
 
   // Follow the server while a mission runs (another client may change things).
   const srvMode = state?.mission.mode;
@@ -172,6 +174,15 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
             onChange={(e) => setExpected(Math.max(0, Number(e.target.value)))}
           />
         </label>
+        {config.survivor_layouts && (
+          <label title="How many survivors New survivors places in the town (1-100)">
+            Survivors in map
+            <input
+              type="number" min={1} max={100} step={1} value={spawn}
+              onChange={(e) => setSpawn(Math.min(100, Math.max(1, Math.round(Number(e.target.value)) || 1)))}
+            />
+          </label>
+        )}
       </div>
       <div className="checks">
         {OPTION_LABELS.map(([k, label]) => (
@@ -208,6 +219,10 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
         <button className="danger" disabled={!running} onClick={() => send({ type: "stop_mission" })}>
           Stop
         </button>
+        <button disabled={!stopped} onClick={() => send({ type: "continue_mission" })}
+          title="Resume the stopped mission: searched area, belief and survivors are kept; search drones take off again">
+          Continue
+        </button>
         <button disabled={!hasMission} onClick={() => send({ type: "restart_mission" })}
           title="Start the last mission again: drones back on their pads, batteries full">
           Restart
@@ -216,6 +231,12 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
           title="Clear the mission: drones back on their pads, batteries full, survivors cleared; nothing starts">
           Reset
         </button>
+        {config.survivor_layouts && (
+          <button onClick={() => send({ type: "new_survivors", count: spawn })}
+            title="Reset, then place 'Survivors in map' survivors at new random positions (roofs and dry ground near the flood); Reset keeps them">
+            New survivors
+          </button>
+        )}
       </div>
     </section>
   );

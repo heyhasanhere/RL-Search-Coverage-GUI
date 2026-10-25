@@ -16,6 +16,8 @@ export function useMission() {
   const [prior, setPrior] = useState<PriorMsg | null>(null);
   const [events, setEvents] = useState<EventMsg[]>([]);
   const [connected, setConnected] = useState(false);
+  // bumped after login or logout: reloads the config and reconnects, since the server reads the cookie at the handshake
+  const [session, setSession] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
 
   const addEvent = useCallback((e: EventMsg) => {
@@ -39,7 +41,7 @@ export function useMission() {
       stop = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     let stop = false;
@@ -87,7 +89,7 @@ export function useMission() {
       window.clearTimeout(timer);
       wsRef.current?.close();
     };
-  }, [addEvent]);
+  }, [addEvent, session]);
 
   const send = useCallback(
     (msg: ClientMsg) => {
@@ -98,5 +100,20 @@ export function useMission() {
     [addEvent],
   );
 
-  return { config, state, belief, prior, events, connected, send, addEvent };
+  const login = useCallback(async (password: string): Promise<boolean> => {
+    const r = await fetch("api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (r.ok) setSession((n) => n + 1);
+    return r.ok;
+  }, []);
+
+  const logout = useCallback(async () => {
+    await fetch("api/logout", { method: "POST" });
+    setSession((n) => n + 1);
+  }, []);
+
+  return { config, state, belief, prior, events, connected, send, addEvent, login, logout };
 }
