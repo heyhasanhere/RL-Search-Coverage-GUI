@@ -27,6 +27,7 @@ from sar.mission.vehicle import SimClock, Vehicle
 
 AIRBORNE = ("SEARCH", "RESCUE_TRANSIT", "ON_SURVIVOR", "RETURNING", "ABORT")
 STOP_FRACTION = 0.02          # search ends when this fraction of the prior remains
+LEAD_SPEED = 3.0              # m/s the carrot may run ahead of the drone's speed along the leg
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Drone:
     task_text: str = ""
     path: list = field(default_factory=list)      # queued 3D points
     carrot: np.ndarray | None = None
+    carrot_v: float = 0.0                         # m/s the carrot moves at, ramped by MissionConfig.accel
     segment: list = field(default_factory=list)   # current segment cells
     plan_cell: tuple | None = None                # end cell of the queued path
     heading: int = -1
@@ -105,7 +107,7 @@ class Orchestrator:
         self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False}
         self.events: list[dict] = []
         self.subscribers: list[asyncio.Queue] = []
-        self._next_sid = 0
+        self._next_sid = 1          # survivor numbers start at 1 in every mission
         self._last_stage = -1e9
         self._loop_task = None
         self._last_track = -1e9      # replay log timestamps (plan 11.2)
@@ -269,6 +271,7 @@ class Orchestrator:
         if options:
             self.options.update({k: bool(v) for k, v in options.items() if k in self.options})
         self.survivors.clear()
+        self._next_sid = 1
         self.truth_en = truth_en
         self.detector = self.detector_factory(self, truth_en)
         self.metrics = {"looks": 0, "relooks": 0, "false_dispatch": 0}
@@ -307,20 +310,37 @@ class Orchestrator:
         """Start the last mission again from scratch: tasks dropped, batteries full, drones on their pads."""
         if self.last_start is None:
             raise ValueError("no mission to restart")
+        await self._reset_world()
+        self.event("mission restarted")
+        self.start_mission(**self.last_start)
+
+    async def reset_mission(self):
+        """Back to the state before the first start: no mission, no survivors, drones idle on their pads."""
+        await self._reset_world()
+        self.mission = None
+        self.survivors.clear()
+        self._next_sid = 1
+        self.event("mission reset")
+
+    async def _reset_world(self):
+        tasks = [d.task for d in self.drones if d.task and not d.task.done()]
+        for t in tasks:
+            t.cancel()
+        # let the old tasks finish unwinding, so none of them commands a drone of the next mission
+        await asyncio.gather(*tasks, return_exceptions=True)
         for d in self.drones:
-            if d.task and not d.task.done():
-                d.task.cancel()
             d.task = None
         if self.mission:
             self.mission.status = "finished"
         if self.on_restart is not None:
             await self.on_restart()
+        else:
+            for d in self.drones:
+                await d.vehicle.reset()
         for d in self.drones:
             d.state, d.task_text, d.battery_s = "IDLE", "", self.cfg.battery_s
             d.survivor, d.target, d.standby_point = None, None, None
             d.path, d.carrot, d.segment, d.plan_cell = [], None, [], None
-        self.event("mission restarted")
-        self.start_mission(**self.last_start)
 
     def recharge(self, d: Drone):
         if d.vehicle.tel.in_air:
@@ -466,6 +486,9 @@ class Orchestrator:
         fl = self.flight
         if d.carrot is None:
             d.carrot = self._pos_agl(d)
+            d.carrot_v = float(np.hypot(*v.tel.vel[:2]))
+        # the operator's speed cap also caps the carrot: a faster carrot leaves the drone behind
+        top = speed if self.drone_speed is None else min(speed, self.drone_speed)
         while d.path:
             if check_relook and d.relook is not None:
                 return "relook"
@@ -480,15 +503,16 @@ class Orchestrator:
                 d.path.pop(0)
                 continue
             u = leg / L
-            spd = speed
+            spd = min(top, self._brake_speed(d, u, L, top), d.carrot_v + cfg.accel * dt)
+            # the carrot leads the drone by at most a few m/s along the leg: after a reversal (a re-look
+            # behind it) the drone first brakes, instead of chasing a carrot that already runs the other way
+            uh = float(np.hypot(u[0], u[1]))
+            if uh > 0.3:
+                along = float(np.dot(v.tel.vel[:2], u[:2])) / uh
+                spd = min(spd, max(along, 0.0) + LEAD_SPEED)
             if abs(u[2]) > 1e-3:
                 spd = min(spd, cfg.climb / abs(u[2]))
-            if len(d.path) > 1 and L < 2 * spd:
-                nxt = d.path[1] - tgt
-                nl = float(np.linalg.norm(nxt))
-                if nl > 1e-3:
-                    cosang = float(np.dot(u, nxt / nl))
-                    spd *= max(0.35, (1 + cosang) / 2)
+            spd = max(spd, 0.3)            # never stall short of the end point
             sp = fl.to_vehicle(d.id, v.home, d.carrot, u)
             # the lag guard is about the horizontal tracking: the height of the setpoint
             # carries the terrain term (ground at the target - ground at home), which is
@@ -496,6 +520,8 @@ class Orchestrator:
             lag = float(np.linalg.norm(sp[:2] - v.tel.pos[:2]))
             blocked = self._sense(d, dt)
             adv = 0.0 if blocked or lag > max(8.0, spd * 1.5) else spd * dt
+            # while the carrot waits for the drone it starts again from the drone's speed, not its own
+            d.carrot_v = spd if adv > 0 else min(spd, float(np.hypot(*v.tel.vel[:2])))
             step = min(adv, L)
             d.carrot = d.carrot + u * step
             if step >= L - 1e-6:
@@ -512,6 +538,40 @@ class Orchestrator:
             await v.setpoint(sp, np.zeros(3))
             await self.clock.sleep(dt)
         return "done"
+
+    def _brake_speed(self, d: Drone, u, L, top):
+        """Highest carrot speed from which the drone can still slow to the turn speed at each corner
+        ahead and stop at the end of the path, braking at MissionConfig.accel."""
+        cfg = self.cfg
+        a, reach = cfg.accel, top * top / (2 * cfg.accel)
+        dist, lim, k = L, math.inf, 0
+        while True:
+            if k + 1 >= len(d.path):
+                return min(lim, math.sqrt(2 * a * dist))            # the end of the path: stop
+            nxt = d.path[k + 1] - d.path[k]
+            nl = float(np.linalg.norm(nxt))
+            if nl > 1e-3:
+                v_turn = self._turn_speed(u, nxt / nl)
+                if v_turn is not None:
+                    lim = min(lim, math.sqrt(v_turn * v_turn + 2 * a * dist))
+                u = nxt / nl
+            dist += nl
+            k += 1
+            if dist > reach:                                         # corners further on do not limit yet
+                return lim
+
+    def _turn_speed(self, u, w):
+        """Carrot speed at the joint from direction u to w (unit 3D vectors); None for a straight joint.
+        Judged on the horizontal parts: a climb or descent after level flight stops the drone."""
+        nu, nw = float(np.hypot(u[0], u[1])), float(np.hypot(w[0], w[1]))
+        if nu < 0.3:                       # leaving a climb or descent: the climb rate already keeps it slow
+            return None
+        if nw < 0.3:                       # level flight into a climb or descent: stop over the point
+            return 0.0
+        cos = float(np.dot(u[:2], w[:2])) / (nu * nw)
+        if cos > 0.995:
+            return None
+        return self.cfg.turn_speed * (1 + cos)          # right angle: turn_speed, U-turn: 0
 
     def _pos_agl(self, d: Drone):
         """Vehicle position with the height above the ground below it (the mission's height frame)."""
@@ -833,6 +893,8 @@ class Orchestrator:
         elif kind == "restart_mission":
             await self.restart_mission()
             self._publish(self.prior_msg())
+        elif kind == "reset_mission":
+            await self.reset_mission()
         elif kind == "recharge":
             self.recharge(d)
         elif kind == "set_drone_speed":

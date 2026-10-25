@@ -80,6 +80,23 @@ def test_search_separation_and_finds():
     asyncio.run(main())
 
 
+def test_reset_numbers_survivors_from_one():
+    async def main():
+        orch = make(fp=1.0)                    # every look reports a candidate: survivors appear at once
+        await orch.start()
+        start = dict(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
+        orch.start_mission(**start)
+        assert await run_until(orch, lambda: orch.survivors, 300)
+        assert min(orch.survivors) == 1
+        await orch.command({"type": "reset_mission"})
+        assert orch.mission is None and not orch.survivors
+        assert all(d.state == "IDLE" and not d.vehicle.tel.in_air for d in orch.drones)
+        orch.start_mission(**start)
+        assert await run_until(orch, lambda: orch.survivors, 300)
+        assert min(orch.survivors) == 1
+        await orch.shutdown()
+    asyncio.run(main())
+
 def test_recall_and_replace():
     async def main():
         orch = make(roles=("search", "search", "search"))

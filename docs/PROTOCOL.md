@@ -24,6 +24,8 @@ The video endpoints proxy the sim bridge (`sim/flooduav/bridge.py`). They are en
 server argument `--bridge <url>`; without it all three answer 404 with
 `{"error": "no bridge configured"}` and the UI shows a placeholder. The server also posts
 `{"drone": i}` to `<bridge>/view` when the operator selects a drone.
+`GET /api/flood_overview.jpg` is the FloodUAV top-down map image under the map panel. It is
+rendered once by Unity at high resolution (`<bridge>/map.jpg`, 4096 px by default).
 
 ## 2. `GET /api/config`
 
@@ -161,6 +163,8 @@ Later missions send it again.
 |---|---|---|
 | `start_mission` | `polygon` ([lon, lat] ring), `lkp` (optional), `mode`, `n_search` (1-3), `expected_survivors`, `options`, `scenario`, `lkp_time_h`, `water_level_m`, `regions` | Builds the grid and prior, launches the search drones |
 | `stop_mission` | - | All drones return home |
+| `restart_mission` | - | Resets the world and starts the last mission again |
+| `reset_mission` | - | Resets the world to before the start and does not start: drones on their pads, batteries full, survivors cleared, survivor numbers start again at 1 |
 | `set_mode` | `mode` | Changes the search mode mid-mission |
 | `recall` | `drone` | Drone returns home (RETURNING) |
 | `standby` | `drone`, `point` ([lon, lat], optional, default home) | Drone parks at the point (STANDBY) |
@@ -171,6 +175,7 @@ Later missions send it again.
 | `set_options` | any of `auto_dispatch`, `auto_replace`, `auto_stage` | Updates options |
 | `set_speed` | `speed` | Kinematic backend only: simulation speed factor |
 | `select` | `drone` or `survivor` | Points the follow camera and the drone camera panel |
+| `camera` | `view: "follow"` with `distance` (m), `yaw`, `pitch` (degrees), or `view: "drone"` with `drone`, `fov`, `pan`, `tilt` (degrees) | Zoom and angle of the 3D follow camera or of a drone camera. FloodUAV only; the server posts it to `<bridge>/camera` |
 
 ### 4.1 Scenario inputs
 

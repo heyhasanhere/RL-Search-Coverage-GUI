@@ -96,6 +96,8 @@ class MissionConfig:
     cruise: float = 10.0               # m/s along search segments (30 m cell in 3 s)
     transit_speed: float = 12.0
     climb: float = 3.0                 # m/s
+    accel: float = 2.5                 # m/s2: planned speed-up and braking along a path, under what the drone can do
+    turn_speed: float = 5.0            # m/s through a right-angle turn; a U-turn stops, a straight joint keeps speed
     tick: float = 0.2                  # orchestrator tick in sim seconds
     battery_s: float = 1500.0          # flight time per drone
     reserve_s: float = 60.0

@@ -78,6 +78,8 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     if not args.bridge:
         raise SystemExit("--backend flooduav needs --bridge <FloodUAV bridge url>")
     info = fetch_info(args.bridge_url)
+    # the Unity drones answer setpoints slower than the kinematic ones: plan gentler braking and turns
+    cfg = replace(cfg, accel=1.5, turn_speed=3.0)
     clock = BridgeClock(args.bridge_url)
     vehicles = [FloodVehicle(i, clock, args.bridge_url, alt_offset=info["min_alt"] - cfg.search_alt,
                              camera_fov_deg=info.get("camera_fov", 60.0))
@@ -104,6 +106,7 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     orch = Orchestrator(cfg, vehicles, roles, clock, ckpt, detector_factory, log_path=log, seed=args.seed)
     orch.scenarios = ("flood",)
     orch.flood_info = info
+    orch.truth_en = truth          # Unity's survivors are known from the start, so truth shows before a mission
     orch.on_restart = restart
     for v in vehicles:
         v.on_reset = lambda reason: orch.event(f"Unity mission ended ({reason}); drones reset to their pads", "warn")
@@ -152,11 +155,13 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
 
     @app.get("/api/flood_overview.jpg")
     async def flood_overview():
-        # the first frame with the drone still at its start is good enough as a map background
+        # one high resolution top-down render of the scene; the first live frame if the bridge has none
         if "jpg" not in overview:
             import httpx
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                r = await client.get(f"{bridge}/overview.jpg")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.get(f"{bridge}/map.jpg")
+                if r.status_code != 200:
+                    r = await client.get(f"{bridge}/overview.jpg")
             if r.status_code != 200:
                 return JSONResponse({"error": "no overview frame"}, status_code=503)
             overview["jpg"] = r.content
@@ -264,6 +269,9 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         try:
             while True:
                 msg = json.loads(await sock.receive_text())
+                if msg.get("type") == "camera":
+                    await _camera(msg)
+                    continue
                 try:
                     await orch.command(msg)
                 except Exception as exc:
@@ -276,6 +284,15 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         finally:
             task.cancel()
             orch.subscribers.remove(q)
+
+    async def _camera(msg: dict) -> None:
+        """Zoom and angle of the follow camera or a drone camera; only the sim bridge has cameras."""
+        if not bridge:
+            return
+        import httpx
+        with contextlib.suppress(Exception):
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(f"{bridge}/camera", json=msg)
 
     async def _after_command(msg: dict) -> None:
         """Side effects the UI expects from a command but the orchestrator does not own."""

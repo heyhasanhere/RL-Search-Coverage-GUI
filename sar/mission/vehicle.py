@@ -131,6 +131,10 @@ class Vehicle:
     async def hold(self):
         await self.setpoint(self.tel.pos.copy(), np.zeros(3))
 
+    async def reset(self):
+        """Back on the home pad, landed. Used by Restart and Reset when the sim has no world reset of its own."""
+        raise NotImplementedError
+
     async def set_max_speed(self, v: float):
         """Operator speed cap, m/s. Vehicles without a speed limit ignore it."""
         if hasattr(self, "max_speed"):
@@ -220,6 +224,12 @@ class KinematicVehicle(Vehicle):
         self._sp_vel = np.zeros(3)
         while self.tel.pos[2] < alt - 0.5:
             await self.clock.sleep(0.2)
+
+    async def reset(self):
+        self._mode = "landed"
+        self.tel.pos, self.tel.vel = self.home.copy(), np.zeros(3)
+        self.tel.armed = self.tel.in_air = False
+        self._sp_pos, self._sp_vel = self.home.copy(), np.zeros(3)
 
     async def setpoint(self, pos, vel, yaw_deg=None):
         if self._mode in ("landed",):
