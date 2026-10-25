@@ -6,6 +6,9 @@
 //   [1, forward, sideways, vertical, yaw]   pickup drone commands, -1..1 (DroneVelocityController)
 //   [2, drone]                              follow camera target: 0 search drone, 1 pickup drone
 //   [3]                                     pickup drone back to its base pad
+//   [4, 0, distance, yaw, pitch]            follow camera offset: distance (m), yaw from behind, pitch above (deg)
+//   [4, 1 + k, fov, pan, tilt]              drone camera k: field of view, pan sideways, tilt from straight down (deg)
+//   [5, size]                               write a size x size top-down map to FLOODUAV_MAP
 // Unity to bridge, every decision step (5 physics steps):
 //   [pos x, y, z normalized in the boundary, velocity x, y, z in the boundary frame (m/s),
 //    heading sin, cos (from boundary forward, clockwise), nearest of 8 horizontal rays / 30 m,
@@ -113,6 +116,19 @@ namespace FloodPatch
             }
             else if (kind == 3)
                 ResetPickup();
+            else if (kind == 4 && v.Count >= 5)
+            {
+                int view = Mathf.RoundToInt(v[1]);
+                if (view == 0 && follow != null)
+                {
+                    Vector3 offset = Quaternion.Euler(Mathf.Clamp(v[4], -10f, 89f), v[3], 0f) * new Vector3(0f, 0f, -Mathf.Max(v[2], 2f));
+                    follow.GetType().GetField("offset").SetValue(follow, offset);
+                }
+                else if (view >= 1)
+                    Hook.DroneView(view - 1, v[2], v[3], v[4]);
+            }
+            else if (kind == 5 && v.Count >= 2)
+                Hook.RenderMap(Mathf.RoundToInt(v[1]));
         }
 
         void FixedUpdate()

@@ -11,6 +11,7 @@
     <Reference Include="$(Managed)/mscorlib.dll" Private="false" />
     <Reference Include="$(Managed)/UnityEngine.CoreModule.dll" Private="false" />
     <Reference Include="$(Managed)/UnityEngine.PhysicsModule.dll" Private="false" />
+    <Reference Include="$(Managed)/UnityEngine.ImageConversionModule.dll" Private="false" />
     <Reference Include="$(Managed)/Unity.ML-Agents.dll" Private="false" />
   </ItemGroup>
 </Project>

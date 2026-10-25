@@ -27,6 +27,6 @@ curl -sf localhost:$BPORT/time >/dev/null || { echo "bridge did not start, see $
 # JAX on its own GPU without preallocation: GPU 0 stays free for Unity
 CUDA_VISIBLE_DEVICES=${FLOODUAV_GPU:-1} XLA_PYTHON_CLIENT_PREALLOCATE=false \
 nohup uv run --no-sync --extra mission python -W ignore -m sar.mission.server --backend flooduav \
-  --bridge http://127.0.0.1:$BPORT --port $PORT --log runs/mission/flooduav_ui.jsonl >$LOG/server.log 2>&1 &
+  --bridge http://127.0.0.1:$BPORT --port $PORT --show-truth --log runs/mission/flooduav_ui.jsonl >$LOG/server.log 2>&1 &
 for i in $(seq 60); do curl -sf localhost:$PORT/api/config >/dev/null && break; sleep 2; done
 curl -sf localhost:$PORT/api/config >/dev/null && echo "UI on http://$(hostname):$PORT" || echo "server did not start, see $LOG/server.log"

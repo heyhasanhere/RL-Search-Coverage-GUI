@@ -12,10 +12,12 @@ setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
   POST /speed              {"speed": m/s} horizontal speed cap for both drones
   POST /reset              restart Unity's mission: drones back on their pads, survivors unfound
   POST /view               {"drone": k} follow camera target
+  POST /camera             {"view": "follow", "distance", "yaw", "pitch"} or {"view": "drone", "drone": k, "fov", "pan", "tilt"}
   GET  /stream/follow      main Unity view
   GET  /stream/cam0, cam1  drone cameras (0 search drone, 1 the build's pickup drone)
   GET  /stream/overview    square top-down view
-  GET  /overview.jpg       one top-down frame, for the map background
+  GET  /overview.jpg       one top-down frame from the live stream
+  GET  /map.jpg            one high resolution top-down render (--map-px), for the map background
 
 Mission frame: east = boundary +x, north = boundary +z, up = boundary +y, in meters, with the
 origin at the drone start point. Run with .venv-fly and DISPLAY set (sim/flooduav/run.sh).
@@ -150,6 +152,7 @@ class Unity:
             "FLOODUAV_TILT": str(args.tilt), "FLOODUAV_TIME_LIMIT": "1000000",
             "FLOODUAV_SPLIT": "1", "FLOODUAV_INFO": args.info, "FLOODUAV_FLEET": "1", "FLOODUAV_SOFT": "1",
             "FLOODUAV_FOLLOW": args.follow, "FLOODUAV_AIRCRAFT": f"wingArea={args.wing_area}",
+            "FLOODUAV_MAP": args.map_file,
         })
         Path(args.info).unlink(missing_ok=True)
         ch = EngineConfigurationChannel()
@@ -312,6 +315,24 @@ class Unity:
     def view(self, k):
         self.fleet.send([2, k])
 
+    def camera(self, msg):
+        if msg.get("view") == "follow":
+            self.fleet.send([4, 0, msg["distance"], msg["yaw"], msg["pitch"]])
+        else:
+            self.fleet.send([4, 1 + int(msg["drone"]), msg["fov"], msg["pan"], msg["tilt"]])
+
+    def map_jpg(self, size, timeout=30.0):
+        """Unity renders the map on its next step and writes the file; None if it does not come."""
+        path = Path(self.args.map_file)
+        path.unlink(missing_ok=True)
+        self.fleet.send([5, size])
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if path.exists():
+                return path.read_bytes()
+            time.sleep(0.2)
+        return None
+
 
 class Grabber:
     """One ffmpeg x11grab per screen region, started on first use; keeps the latest JPEG."""
@@ -358,6 +379,7 @@ class Grabber:
 
 def make_handler(unity: Unity, grab: Grabber, args):
     sc = unity.scene
+    maps: dict[str, bytes] = {}       # the map render, made once: the town does not change
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -384,6 +406,19 @@ def make_handler(unity: Unity, grab: Grabber, args):
                                    "survivors": [{"id": k, "e": v[0], "n": v[1]} for k, v in sc.survivors().items()],
                                    "limits": {"lo": sc.lo.tolist(), "hi": sc.hi.tolist()},
                                    "min_alt": args.min_alt, "max_speed": args.max_speed})
+            if path == "/map.jpg":
+                if "map" not in maps:
+                    jpg = unity.map_jpg(args.map_px)
+                    if jpg is None:
+                        return self._json({"error": "no map render"}, 503)
+                    maps["map"] = jpg
+                jpg = maps["map"]
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpg)))
+                self.end_headers()
+                self.wfile.write(jpg)
+                return
             if path == "/overview.jpg":
                 _, jpg = grab.latest("overview")
                 if jpg is None:
@@ -433,6 +468,9 @@ def make_handler(unity: Unity, grab: Grabber, args):
             if self.path == "/view":
                 unity.view(int(msg.get("drone", 0)))
                 return self._json({"ok": True})
+            if self.path == "/camera":
+                unity.camera(msg)
+                return self._json({"ok": True})
             return self._json({"error": "not found"}, 404)
 
     return Handler
@@ -465,6 +503,8 @@ def main():
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":97"))
     ap.add_argument("--info", default="/tmp/flooduav_info.json")
     ap.add_argument("--unity-log", default="/tmp/flooduav_unity.log")
+    ap.add_argument("--map-file", default="/tmp/flooduav_map.jpg", help="where Unity writes the map render")
+    ap.add_argument("--map-px", type=int, default=4096, help="map render size, pixels per side")
     args = ap.parse_args()
 
     unity = Unity(args)

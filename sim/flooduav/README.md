@@ -44,6 +44,8 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - If Unity ends its mission (collision or leaving the boundary), the drone resets to the start and the UI logs a warning.
 - Two drones under our control, 15 fixed survivors. D2 has no sensor in the build: it detects survivors inside its camera footprint.
 - Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. Speed cap: `POST /speed`. Follow target: `POST /view`.
+- Camera zoom and angle: `POST /camera` with `{"view": "follow", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
+- Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
 - The build's mission map goes to a second display, which Xvfb does not have.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.
 - Replay of a FloodUAV mission draws the tracks on a plain map: the log does not keep the Unity top-down image or the search area outline.

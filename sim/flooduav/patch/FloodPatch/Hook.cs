@@ -14,6 +14,7 @@
 //   FLOODUAV_FOLLOW    follow camera offset "x,y,z" behind the drone (build default 0,12,-40)
 //   FLOODUAV_FLEET     1: the pickup drone becomes a second drone the bridge flies (Fleet.cs)
 //   FLOODUAV_SOFT      1: contact with the ground or buildings no longer ends the mission, so drones can land
+//   FLOODUAV_MAP       path the high resolution top-down map is written to (JPEG, Fleet message 5)
 
 using System;
 using System.Collections;
@@ -30,6 +31,10 @@ namespace FloodPatch
         const BindingFlags F = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
         static bool viewsReady;
         static MonoBehaviour pickup;
+        // the on-screen drone cameras (0 search drone, 1 pickup drone), their straight-down pose, and the overview
+        static readonly Camera[] droneCams = new Camera[2];
+        static readonly Quaternion[] camBase = new Quaternion[2];
+        static Camera overview;
 
         // Screen layout in pixels (x, y from the top, w, h); the bridge crops the same regions.
         const float SW = 2640f, SH = 720f;
@@ -186,11 +191,15 @@ namespace FloodPatch
                     "[FloodPatch] search camera fov={0} mask={1} near={2} far={3} enabled={4} forward={5}",
                     search.fieldOfView, search.cullingMask, search.nearClipPlane, search.farClipPlane, search.enabled,
                     V(search.transform.forward)));
-                DroneCam(main, search.transform, Quaternion.identity, search.fieldOfView, Cam0, 50f, 0.3f);
+                camBase[0] = Quaternion.identity;
+                droneCams[0] = DroneCam(main, search.transform, camBase[0], search.fieldOfView, Cam0, 50f, 0.3f);
                 // the pickup drone has no sensor camera: one straight down, top of the image forward,
                 // from its centre, so the near plane clears its own hull
                 if (pickup != null)
-                    DroneCam(main, pickup.transform, Quaternion.Euler(90f, 0f, 0f), search.fieldOfView, Cam1, 52f, 4f);
+                {
+                    camBase[1] = Quaternion.Euler(90f, 0f, 0f);
+                    droneCams[1] = DroneCam(main, pickup.transform, camBase[1], search.fieldOfView, Cam1, 52f, 4f);
+                }
             }
 
             Bounds b = box.bounds;
@@ -205,7 +214,53 @@ namespace FloodPatch
             ov.farClipPlane = b.size.y + 2000f;
             ov.rect = R(Overview);
             ov.depth = 51f;
+            overview = ov;
             Debug.Log("[FloodPatch] split views ready");
+        }
+
+        // Zoom and gimbal of an on-screen drone camera; the sensor camera that finds survivors is not touched.
+        // tilt: degrees from straight down toward the drone's forward; pan: degrees sideways.
+        public static void DroneView(int k, float fov, float pan, float tilt)
+        {
+            if (k < 0 || k >= droneCams.Length || droneCams[k] == null)
+                return;
+            droneCams[k].fieldOfView = Mathf.Clamp(fov, 5f, 120f);
+            droneCams[k].transform.localRotation = camBase[k] * Quaternion.Euler(-Mathf.Clamp(tilt, 0f, 89f), Mathf.Clamp(pan, -90f, 90f), 0f);
+        }
+
+        // One square top-down render of the overview camera at `size` pixels, written as a JPEG to FLOODUAV_MAP.
+        public static void RenderMap(int size)
+        {
+            string path = Environment.GetEnvironmentVariable("FLOODUAV_MAP");
+            if (overview == null || string.IsNullOrEmpty(path))
+                return;
+            size = Mathf.Clamp(size, 256, 8192);
+            RenderTexture rt = new RenderTexture(size, size, 24);
+            rt.antiAliasing = 4;
+            Rect rect = overview.rect;
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGB24, false);
+            try
+            {
+                overview.targetTexture = rt;
+                overview.rect = new Rect(0f, 0f, 1f, 1f);
+                overview.Render();
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(0, 0, size, size), 0, 0);
+                tex.Apply();
+                File.WriteAllBytes(path + ".tmp", ImageConversion.EncodeToJPG(tex, 92));
+                if (File.Exists(path))
+                    File.Delete(path);
+                File.Move(path + ".tmp", path);
+                Debug.Log("[FloodPatch] map " + size + " px written to " + path);
+            }
+            finally
+            {
+                RenderTexture.active = null;
+                overview.targetTexture = null;
+                overview.rect = rect;
+                UnityEngine.Object.Destroy(rt);
+                UnityEngine.Object.Destroy(tex);
+            }
         }
 
         static string V(Vector3 v)
