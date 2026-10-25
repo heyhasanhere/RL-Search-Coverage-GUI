@@ -293,6 +293,8 @@ export type ClientMsg =
   | { type: "stop_mission" }
   /** Start the last mission again: drones back on their pads, batteries full. */
   | { type: "restart_mission" }
+  /** Back to before the first start: no mission, drones on their pads, batteries full. Nothing starts. */
+  | { type: "reset_mission" }
   /** Full battery for a landed drone. */
   | { type: "recharge"; drone: number }
   /** Horizontal speed cap for all drones, m/s. */
@@ -307,7 +309,10 @@ export type ClientMsg =
   | { type: "set_options"; auto_dispatch?: boolean; auto_replace?: boolean; auto_stage?: boolean }
   | { type: "set_speed"; speed: number }
   /** v2: points the follow camera and the camera panel. */
-  | { type: "select"; drone?: number; survivor?: number };
+  | { type: "select"; drone?: number; survivor?: number }
+  /** Zoom and angle of the 3D follow camera (distance m, yaw and pitch deg) or a drone camera (fov, pan, tilt deg). */
+  | { type: "camera"; view: "follow"; distance: number; yaw: number; pitch: number }
+  | { type: "camera"; view: "drone"; drone: number; fov: number; pan: number; tilt: number };
 
 export const SURVIVOR_COLORS: Record<SurvivorStatus, string> = {
   candidate: "#facc15",

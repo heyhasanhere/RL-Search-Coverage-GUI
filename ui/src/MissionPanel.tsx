@@ -212,6 +212,10 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
           title="Start the last mission again: drones back on their pads, batteries full">
           Restart
         </button>
+        <button onClick={() => send({ type: "reset_mission" })}
+          title="Clear the mission: drones back on their pads, batteries full, survivors cleared; nothing starts">
+          Reset
+        </button>
       </div>
     </section>
   );

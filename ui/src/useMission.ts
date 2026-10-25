@@ -59,7 +59,14 @@ export function useMission() {
         } catch {
           return;
         }
-        if (msg.type === "state") setState(msg);
+        if (msg.type === "state") {
+          setState(msg);
+          // no mission (before the first start or after a reset): drop the last mission's map layers
+          if (msg.mission.status === "idle") {
+            setBelief(null);
+            setPrior(null);
+          }
+        }
         else if (msg.type === "belief") setBelief(msg);
         else if (msg.type === "prior") setPrior(msg);
         else if (msg.type === "event") addEvent(msg);

@@ -10,12 +10,30 @@ import VideoPanel from "./VideoPanel";
 import PriorPanel from "./PriorPanel";
 import RecordedVideo from "./RecordedVideo";
 import ReplayControls from "./ReplayControls";
+import { useCameraViews } from "./useCameraViews";
 import { replayBeliefAt, replayEventsAt, replayPrior, replayStateAt } from "./replayState";
 import type { LonLat, Region } from "./types";
 import { fmtTime } from "./types";
 
 const pct = (x: number | undefined) => (x == null || Number.isNaN(x) ? "-" : `${(x * 100).toFixed(0)}%`);
 const DEFAULT_REGION_WEIGHT = 0.3;
+const TRUTH_KEY = "sar.showTruth";
+
+function loadFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveFlag(key: string, v: boolean) {
+  try {
+    window.localStorage.setItem(key, v ? "1" : "0");
+  } catch {
+    // storage blocked: the setting lasts until the page reloads
+  }
+}
 
 export default function App() {
   const live = useMission();
@@ -36,7 +54,14 @@ export default function App() {
   const [base, setBase] = useState<BaseLayer>("esri");
   const [showBelief, setShowBelief] = useState(true);
   const [showCoverage, setShowCoverage] = useState(false);
-  const [showTruth, setShowTruth] = useState(false);
+  const [showTruth, setShowTruthState] = useState(() => loadFlag(TRUTH_KEY));
+  const setShowTruth = useCallback((v: boolean) => {
+    setShowTruthState(v);
+    saveFlag(TRUTH_KEY, v);
+  }, []);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which stream fills the large pane; the other one goes to the small pane on the right.
+  const [mainView, setMainView] = useState<"follow" | "camera">("follow");
   const [showPrior, setShowPrior] = useState<Set<string>>(new Set());
   const [selectedDrone, setSelectedDrone] = useState<number | null>(null);
   const [selectedSurvivor, setSelectedSurvivor] = useState<number | null>(null);
@@ -89,6 +114,7 @@ export default function App() {
   const { state, belief, prior, events } = shown;
   // Replay is read-only: nothing goes to the live server.
   const send = useMemo(() => (isReplay ? () => undefined : live.send), [isReplay, live.send]);
+  const cv = useCameraViews(send);
   const pickReplay = useCallback((id: string) => {
     setReplayId(id);
     setT(0);
@@ -150,6 +176,46 @@ export default function App() {
   const openCandidates = state?.survivors.filter((s) => s.status === "candidate").length ?? 0;
   const scenario = prior?.scenario ?? (config?.scenarios?.[0] ?? "wilderness");
 
+  const camView = cv.cams[camDrone];
+  const followPane = isReplay ? (
+    <RecordedVideo
+      video={rec?.videos?.follow}
+      t={t} playing={playing} speed={speed}
+      title="3D follow (recorded)"
+      placeholder={rec ? "The follow view was not recorded for this mission" : "Pick a recorded mission"}
+    />
+  ) : (
+    <VideoPanel
+      src="video/follow.mjpg"
+      title={`3D follow - ${camName}`}
+      streamKey={`follow-${camDrone}`}
+      placeholder={hasBridge ? "Waiting for the sim bridge stream" : "3D view needs a sim bridge (--bridge)"}
+      onZoom={hasBridge ? cv.followZoom : undefined}
+      onDrag={hasBridge ? cv.followDrag : undefined}
+      onReset={hasBridge ? cv.followReset : undefined}
+      hint={`${cv.follow.distance.toFixed(0)} m, ${cv.follow.pitch.toFixed(0)}° up`}
+    />
+  );
+  const cameraPane = isReplay ? (
+    <RecordedVideo
+      video={rec?.videos?.[`cam${camDrone}`]}
+      t={t} playing={playing} speed={speed}
+      title={`Drone camera - ${camName} (recorded)`}
+      placeholder="The drone camera was not recorded for this mission"
+    />
+  ) : (
+    <VideoPanel
+      src={`video/camera/${camDrone}.mjpg`}
+      title={`Drone camera - ${camName}`}
+      streamKey={camDrone}
+      placeholder={hasBridge ? "Waiting for the drone camera" : "Drone camera needs a sim bridge (--bridge)"}
+      onZoom={hasBridge ? (s) => cv.camZoom(camDrone, s) : undefined}
+      onDrag={hasBridge ? (dx, dy) => cv.camDrag(camDrone, dx, dy) : undefined}
+      onReset={hasBridge ? () => cv.camReset(camDrone) : undefined}
+      hint={camView ? `fov ${camView.fov.toFixed(0)}°, tilt ${camView.tilt.toFixed(0)}°` : "fov 60°, straight down"}
+    />
+  );
+
   return (
     <div className="app">
       <header className="statusbar">
@@ -187,48 +253,37 @@ export default function App() {
           )}
           <label><input type="checkbox" checked={showBelief} onChange={(e) => setShowBelief(e.target.checked)} /> Belief</label>
           <label><input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} /> Coverage</label>
-          {state?.truth && (
-            <label><input type="checkbox" checked={showTruth} onChange={(e) => setShowTruth(e.target.checked)} /> Truth</label>
-          )}
+          <div className="settings">
+            <button className={settingsOpen ? "active" : ""} onClick={() => setSettingsOpen((v) => !v)}>Settings</button>
+            {settingsOpen && (
+              <div className="settings-menu">
+                <label title={state?.truth ? "Mark where the survivors really are" : "The server sends no ground truth (start it with --show-truth)"}>
+                  <input type="checkbox" checked={showTruth} disabled={!state?.truth}
+                    onChange={(e) => setShowTruth(e.target.checked)} />
+                  Show survivor truth on the map
+                </label>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       <div className="screen">
         <div className="cell cell-3d">
-          {isReplay ? (
-            <RecordedVideo
-              video={rec?.videos?.follow}
-              t={t} playing={playing} speed={speed}
-              title="3D follow (recorded)"
-              placeholder={rec ? "The follow view was not recorded for this mission" : "Pick a recorded mission"}
-            />
-          ) : (
-          <VideoPanel
-            src="video/follow.mjpg"
-            title={`3D follow - ${camName}`}
-            streamKey={`follow-${camDrone}`}
-            placeholder={hasBridge ? "Waiting for the sim bridge stream" : "3D view needs a sim bridge (--bridge)"}
-          />
+          {mainView === "follow" ? followPane : cameraPane}
+          {!isReplay && (
+            <div className="view-toggle">
+              <button className={mainView === "follow" ? "active" : ""} onClick={() => setMainView("follow")}
+                title="3D follow view in the large pane">3D follow</button>
+              <button className={mainView === "camera" ? "active" : ""} onClick={() => setMainView("camera")}
+                title="Drone camera in the large pane">Drone camera</button>
+            </div>
           )}
         </div>
 
         <div className="rightcol">
           <div className="cell cell-cam">
-            {isReplay ? (
-              <RecordedVideo
-                video={rec?.videos?.[`cam${camDrone}`]}
-                t={t} playing={playing} speed={speed}
-                title={`Drone camera - ${camName} (recorded)`}
-                placeholder="The drone camera was not recorded for this mission"
-              />
-            ) : (
-            <VideoPanel
-              src={`video/camera/${camDrone}.mjpg`}
-              title={`Drone camera - ${camName}`}
-              streamKey={camDrone}
-              placeholder={hasBridge ? "Waiting for the drone camera" : "Drone camera needs a sim bridge (--bridge)"}
-            />
-            )}
+            {mainView === "follow" ? cameraPane : followPane}
             {state && state.drones.length > 1 && (
               <div className="view-toggle cam-tabs">
                 {state.drones.map((d) => (

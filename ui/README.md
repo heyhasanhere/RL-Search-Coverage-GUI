@@ -27,7 +27,7 @@ Without it they show a placeholder.
 | Panel | Position | Content |
 |---|---|---|
 | Status bar | top | Scenario, mission, mode, time, found, candidates, covered, remaining |
-| 3D view | large, top left | Follow camera on the selected drone, with a Follow / Overview toggle |
+| 3D view | large, top left | Follow camera on the selected drone, with a Follow / Overview toggle. A 3D Follow / Drone Camera toggle swaps it with the drone camera panel |
 | Drone camera | top right, upper | Downward camera of the selected drone, with detector boxes drawn server side |
 | Map and grid | top right, lower | Area, belief, coverage, routes, altitude level per drone, prior layer toggles |
 | Mission and drones | bottom left | Scenario inputs and per-drone state, level, AGL, battery, sortie, recall, standby |
@@ -44,6 +44,9 @@ Without it they show a placeholder.
 - Clicking a drone in the list or on the map sends `{"type":"select","drone":i}` and switches
   both video panels to it. Clicking a survivor sends `{"type":"select","survivor":id}`.
 - Drone `Standby`: click the map to choose the point, or `At home`.
+- 3D follow and drone camera (FloodUAV): scroll to zoom, drag to turn, double-click to reset.
+- `Restart` resets the world and starts the same mission again. `Reset` resets the world and waits for Start.
+- `Settings` (top bar): show or hide the true survivor positions on the map.
 
 ## Screenshots
 
