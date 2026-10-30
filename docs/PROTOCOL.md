@@ -268,6 +268,12 @@ Drones flown by the Unity agent, and drones in the middle of a re-look, do not s
 A switched drone searches again after the rescue.
 The dispatch event reads `auto switch: <eta> s vs <wait> s wait`, and the mission log gets a `switch` row (`sid`, `drone`, `eta`, `cost`, `wait`).
 
+**Coverage.**
+A look lowers the belief by `pd` in every cell whose center is inside the drone's camera footprint (`footprint_m`).
+A vehicle without a footprint sees only the cell below it.
+A cell counts once per pass: cells still in view from the drone's last look are skipped.
+A hold on one cell looks again on purpose.
+
 ## 5. Replay
 
 The split replay compares two methods on the same scenario and seed.

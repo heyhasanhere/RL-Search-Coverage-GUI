@@ -62,6 +62,7 @@ class Drone:
     survivor: int | None = None
     entry: tuple | None = None
     agent: bool = False                           # the sim's trained agent flies it (AGENT_MODE)
+    view: set = field(default_factory=set)        # cells in the camera footprint at the last look
     resume_search: bool = False                   # switched from search by _auto_switch: search again after the rescue
 
 
@@ -401,6 +402,7 @@ class Orchestrator:
             d.state, d.task_text, d.battery_s = "IDLE", "", self.cfg.battery_s
             d.survivor, d.target, d.standby_point = None, None, None
             d.path, d.carrot, d.segment, d.plan_cell = [], None, [], None
+            d.view, d.last_cell = set(), None
 
     def recharge(self, d: Drone):
         if d.vehicle.tel.in_air:
@@ -497,14 +499,38 @@ class Orchestrator:
             return get_policy_v2(self.mission.grid.g).heading_of(a)
         return self.policy.heading_of(a)
 
-    def _look(self, d: Drone, cell):
+    def _view_cells(self, d: Drone, cell):
+        """Grid cells the drone's camera sees: the cell below, and every cell whose center is inside
+        the vehicle's footprint box (footprint_m: half sizes, along-track on the compass heading)."""
+        g = self.mission.grid
+        fp = d.vehicle.footprint_m()
+        cells = {tuple(cell)}
+        if fp is not None:
+            along, cross = fp
+            p, h = d.vehicle.tel.pos, math.radians(d.vehicle.tel.yaw)
+            k = int(math.ceil(math.hypot(along, cross) / self.cfg.cell_m))
+            rr, cc = np.mgrid[cell[0] - k: cell[0] + k + 1, cell[1] - k: cell[1] + k + 1]
+            e, n = g.cell_center(rr, cc)
+            de, dn = e - p[0], n - p[1]
+            a = de * math.sin(h) + dn * math.cos(h)
+            x = de * math.cos(h) - dn * math.sin(h)
+            inside = (np.abs(a) <= along) & (np.abs(x) <= cross)
+            cells |= {(int(r), int(c)) for r, c in zip(rr[inside], cc[inside])}
+        return {(r, c) for r, c in cells if g.in_grid(r, c)}
+
+    def _look(self, d: Drone, cell, again=False):
+        """One camera look: each seen cell's belief drops by pd. A cell counts once per pass under the
+        footprint (cells still in view from d's last look are skipped), or again on a deliberate hold."""
         m = self.mission
-        r, c = cell
-        if not m.grid.in_grid(r, c):
+        cells = self._view_cells(d, cell)
+        new = cells if again else cells - d.view
+        d.view = cells
+        if not cells:
             return
-        if m.grid.mask[r, c]:
-            m.belief[r, c] *= (1.0 - self.cfg.pd)
-        m.looks[r, c] += 1
+        for r, c in new:
+            if m.grid.mask[r, c]:
+                m.belief[r, c] *= (1.0 - self.cfg.pd)
+            m.looks[r, c] += 1
         self.metrics["looks"] += 1
         pos = d.vehicle.tel.pos.copy()
         asyncio.create_task(self._detect(d, pos, d.vehicle.tel.yaw))
@@ -751,7 +777,7 @@ class Orchestrator:
             if len(cells) == 1:                      # hold: look again and wait one segment
                 await self._follow(d, cfg.cruise, check_relook=True)
                 d.segment = cells
-                self._look(d, d.plan_cell)
+                self._look(d, d.plan_cell, again=True)
                 d.heading = -1
                 await self.clock.sleep(seg_time)
                 continue
@@ -1089,6 +1115,8 @@ class Orchestrator:
                 if cell != d.last_cell:
                     d.last_cell = cell
                     self._look(d, cell)
+            else:
+                d.view, d.last_cell = set(), None     # out of view: the next look is a new pass
         if m and m.status == "running":
             if self.options["auto_switch"] and not m.stopping:
                 self._auto_switch()

@@ -283,6 +283,28 @@ def test_operator_dispatch_and_standby_no_drain():
     asyncio.run(main())
 
 
+def test_look_covers_footprint_once_per_pass():
+    async def main():
+        orch = make(roles=("search", "rescue"))
+        await orch.start()
+        orch.start_mission(polygon=square(), mode="lawnmower", n_search=0, expected_survivors=1)
+        m, d = orch.mission, orch.drones[0]
+        d.vehicle.footprint_m = lambda: [45.0, 45.0]     # a 90 m box: 3 x 3 cells of 30 m
+        cell = m.grid.cell_of(0.0, 0.0)
+        e, n = m.grid.cell_center(*cell)
+        d.vehicle.tel.pos[:2] = [e, n]
+        b0 = m.belief.copy()
+        orch._look(d, cell)
+        assert int(((m.looks > 0) & m.grid.mask).sum()) == 9
+        assert np.allclose(m.belief[m.looks > 0], b0[m.looks > 0] * (1 - orch.cfg.pd))
+        orch._look(d, cell)                               # still in view: no second update
+        assert m.looks.max() == 1
+        orch._look(d, cell, again=True)                   # a deliberate hold looks again
+        assert m.looks.max() == 2
+        await orch.shutdown()
+    asyncio.run(main())
+
+
 def test_bad_commands_raise():
     async def main():
         orch = make()
