@@ -118,8 +118,8 @@ class Orchestrator:
         self._warm_grids: set[int] = set()
         self._link_grace = -1e9                  # no lost-link check before this time (after a stall)
         self.survivors: dict[int, Survivor] = {}
-        self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False, "auto_switch": True,
-                        "relook": True}           # relook: fly a re-look before confirming a candidate
+        self.options = {"auto_dispatch": True, "auto_replace": True, "auto_stage": True, "auto_switch": True,
+                        "relook": False}           # relook: fly a re-look before confirming a candidate
         self.events: list[dict] = []
         self.subscribers: list[asyncio.Queue] = []
         self._next_sid = 1          # survivor numbers start at 1 in every mission

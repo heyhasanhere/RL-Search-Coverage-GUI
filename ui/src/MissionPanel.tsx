@@ -71,16 +71,18 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
       .then((c: Config | null) => c?.agents && setAgents(c.agents))
       .catch(() => undefined);
   };
-  const [expected, setExpected] = useState(3);
+  const [expected, setExpected] = useState(15);
   const [spawn, setSpawn] = useState(15);
   const [mix, setMix] = useState<SurvivorMix>(MIX_DEFAULT);
   const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
   const [lkpTimeH, setLkpTimeH] = useState(6);
   const [waterLevel, setWaterLevel] = useState(10.5);   // m above the normal river; floods the demo town
-  const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false, auto_switch: true, relook: true });
+  const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: true, auto_stage: true, auto_switch: true, relook: false });
   const [speed, setSpeed] = useState(1);
-  const [droneSpeed, setDroneSpeed] = useState<number | null>(null);
-  const shownSpeed = droneSpeed ?? state?.drone_speed ?? 10;
+  // rl_unity flies slower by default
+  const defaultDroneSpeed = (m: string) => (m === "rl_unity" ? 3 : 15);
+  const [droneSpeed, setDroneSpeed] = useState(defaultDroneSpeed(config.modes[0] ?? ""));
+  const shownSpeed = droneSpeed;
   const sendDroneSpeed = () => send({ type: "set_drone_speed", speed: shownSpeed });
   // rl_unity: the agent keeps the flight limits it was trained with unless the operator overrides them
   const trainingLimits = mode === "rl_unity" && (state?.agent_limits ?? "training") === "training";
@@ -109,6 +111,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
 
   const start = () => {
     if (problem || !polygon) return;
+    sendDroneSpeed();
     send({
       type: "start_mission",
       polygon,
@@ -126,7 +129,11 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
 
   const changeMode = (v: string) => {
     setMode(v);
-    if (!running) setNSearch(defaultSearch(v));
+    if (!running) {
+      setNSearch(defaultSearch(v));
+      setDroneSpeed(defaultDroneSpeed(v));
+      send({ type: "set_drone_speed", speed: defaultDroneSpeed(v) });
+    }
     if (v === "rl_unity") {
       send({ type: "set_agent_limits", limits: "training" });
       refreshAgents();

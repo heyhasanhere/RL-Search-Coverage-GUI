@@ -102,7 +102,7 @@ The agent cannot fly a re-look, so its finds are confirmed at once.
     "score": 0.87, "views": 2, "has_snapshot": true,
     "assigned": 2 | null, "t_detected": 88.2, "t_confirmed": 97.0 | null, "t_reached": null
   }],
-  "options": {"auto_dispatch": true, "auto_replace": false, "auto_stage": false, "auto_switch": true, "relook": true},
+  "options": {"auto_dispatch": true, "auto_replace": true, "auto_stage": true, "auto_switch": true, "relook": false},
   "truth": [[lon, lat], ...] | null
 }
 ```
@@ -218,8 +218,8 @@ not know them ignores them, so an old orchestrator still runs an old UI.
   "lkp": [149.58, -33.42],
   "mode": "rl_search",
   "n_search": 3,
-  "expected_survivors": 3,
-  "options": {"auto_dispatch": true, "auto_replace": false, "auto_stage": false, "auto_switch": true, "relook": true},
+  "expected_survivors": 15,
+  "options": {"auto_dispatch": true, "auto_replace": true, "auto_stage": true, "auto_switch": true, "relook": false},
   "scenario": "wilderness",
   "lkp_time_h": 6,
   "regions": [{"polygon": [[149.575, -33.425], [149.585, -33.425], [149.585, -33.415], [149.575, -33.415]], "weight": 0.3}]
@@ -245,10 +245,10 @@ The server answers an invalid command with an `event` of level `error`.
 | Option | Default | Effect |
 |---|---|---|
 | `auto_dispatch` | on | Sends a free rescue drone (landed or standing by) to each confirmed survivor, picking the pairs that give the shortest flight times |
-| `auto_replace` | off | Launches a standby search drone when a search drone leaves the search |
-| `auto_stage` | off | Moves standing-by rescue drones toward the center of the remaining belief every 30 s |
+| `auto_replace` | on | Launches a standby search drone when a search drone leaves the search |
+| `auto_stage` | on | Moves standing-by rescue drones toward the center of the remaining belief every 30 s |
 | `auto_switch` | on | Lets a search drone switch to rescue when that is faster than waiting for a rescue drone (below). Never in `rl_unity` mode |
-| `relook` | on | A search drone that detects a survivor flies to a point beside it and looks again before the survivor is confirmed. Off: a detection is confirmed at once. Never in `rl_unity` mode, where the sim's sensor confirms finds |
+| `relook` | off | A search drone that detects a survivor flies to a point beside it and looks again before the survivor is confirmed. Off: a detection is confirmed at once. Never in `rl_unity` mode, where the sim's sensor confirms finds |
 
 **Switch to rescue.**
 The server checks every confirmed survivor without a drone on each tick (0.2 s), oldest first.
