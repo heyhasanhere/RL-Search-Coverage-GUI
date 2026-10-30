@@ -44,10 +44,12 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - Mission frame: east = boundary +x, north = +z, origin at the drone start. The lon/lat are made up (`MissionConfig.home`).
 - Heights: the drone never flies below 40 m above the start (bridges at about 12 m end the mission). The vehicle maps the 23 m search height to 40 m.
 - Landing is real: the drone descends straight down and keeps pushing down on the ground. Over open water (no ground within 150 m) it hovers instead.
-- If Unity ends its mission (collision or leaving the boundary), the drone resets to the start and the UI logs a warning.
 - Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. It keeps the survivor positions. Speed cap: `POST /speed`. Follow target: `POST /view`.
 - Camera zoom and angle: `POST /camera` with `{"view": "follow", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
 - Detection: a drone detects every survivor inside its detection box, the box drawn around it on the map. The box is the downward camera's ground view from the bridge's `--min-alt` (46 x 82 m at 40 m) and keeps that size at any height. The rule uses the true survivor positions with no line of sight; Unity's own visibility sensor is not used.
+- If a drone leaves the boundary (sides or top, about 83 m above the start), Unity ends its mission and freezes both drones. Stop and Recall cannot move them then; Reset puts them back on their pads. Collisions do not end the mission (`FLOODUAV_SOFT`).
+- Commands to the bridge are sent up to 3 times before the drone's task fails.
+- Lost link: a flying drone with no position update for 3 s is reported lost and aborted. After a pause of the mission server, the check waits one more 3 s first.
 - Two drones under our control, 15 survivors by default (1-100, see Survivor positions). Both drones use the same detection box.
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
 - The build's mission map goes to a second display, which Xvfb does not have.

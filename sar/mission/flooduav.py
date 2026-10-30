@@ -71,8 +71,15 @@ class FloodVehicle(Vehicle):
                 pass          # no update: the orchestrator's link timeout notices
             await asyncio.sleep(0.1)
 
-    async def _post(self, body):
-        await self.client.post(f"{self.bridge}/setpoint", json={"drone": self.id, **body})
+    async def _post(self, body, tries=3):
+        """One command to the bridge; a slow or lost reply is sent again before it fails the task."""
+        for k in range(tries):
+            try:
+                await self.client.post(f"{self.bridge}/setpoint", json={"drone": self.id, **body})
+                return
+            except httpx.HTTPError:
+                if k == tries - 1:
+                    raise
 
     async def _send(self, pos, vel=None):
         pos = np.asarray(pos, float).copy()

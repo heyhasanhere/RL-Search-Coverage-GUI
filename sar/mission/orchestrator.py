@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import math
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -104,6 +105,7 @@ class Orchestrator:
         self.detector = None
         self.truth_en = None
         self.policies: dict[int, SearchPolicy] = {}
+        self._link_grace = -1e9                  # no lost-link check before this time (after a stall)
         self.survivors: dict[int, Survivor] = {}
         self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False}
         self.events: list[dict] = []
@@ -209,6 +211,7 @@ class Orchestrator:
             raise
         except Exception as exc:  # keep the orchestrator alive; report the failure
             self.event(f"{d.name} task failed: {exc!r}", "error")
+            traceback.print_exc()
             if not d.vehicle.tel.in_air:
                 d.state, d.task_text = "LANDED", "task error on the ground"
                 self.log("state", drone=d.id, state="LANDED", text=repr(exc))
@@ -873,8 +876,10 @@ class Orchestrator:
                 d.battery_s -= dt
             # lost link
             # a long gap between ticks means this process stalled, not the link
-            stalled = dt > cfg.link_timeout / 2
-            if not stalled and d.state in AIRBORNE and d.state != "ABORT" and t - tel.t_update > cfg.link_timeout:
+            if dt > cfg.link_timeout / 2:
+                # telemetry polls wait for the loop too: give them one timeout to report again
+                self._link_grace = t + cfg.link_timeout
+            if t >= self._link_grace and d.state in AIRBORNE and d.state != "ABORT" and t - tel.t_update > cfg.link_timeout:
                 self.event(f"{d.name} lost link", "error")
                 was_search = d.state == "SEARCH"
                 self._set_task(d, self._abort(d), "ABORT", "lost link: hover then RTL")
