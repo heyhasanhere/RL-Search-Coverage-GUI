@@ -28,7 +28,8 @@ sim/
   flooduav/              Unity bridge, build patch (C#), run.sh
 unity/SearchPickupDefault/  FloodUAV Linux build, downloaded by scripts/get_unity.sh (not in git)
 models/
-  ft_best/seed1/         RL search policy (default `rl` mode)
+  ft_flood/seed1/        RL search policy fine-tuned on flood towns (default `rl` mode)
+  ft_best/seed1/         previous RL search policy (`--ckpt models/ft_best/seed1`)
   v2_m4/final/           v2 policy for the altitude and tree-search modes
   unity_survivor_search/ FloodUAV's own trained agent (`rl_unity` mode)
   RL_PPO-TRPO-DQN/       more `rl_unity` agents: PPO checkpoints, DQN and TRPO
