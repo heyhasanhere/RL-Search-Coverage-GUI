@@ -122,6 +122,7 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 .autohide:hover, .autohide:focus-within, .autohide.open { opacity: 1; }
 .autohide:not(:hover):not(:focus-within):not(.open) > :not(.autohide-title) { display: none; }
 .prior-toggles label { flex-direction: row; align-items: center; gap: 4px; color: var(--text); font-size: 12px; }
+.prior-empty { color: var(--muted); font-size: 12px; }
 
 .region-weight { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12px; color: var(--muted); }
 .region-weight input { flex: 1; }
