@@ -9,7 +9,7 @@
 //   FLOODUAV_TILT      max tilt, degrees, 1..25 (build default 12); sets the horizontal acceleration
 //   FLOODUAV_AIRCRAFT  comma-separated name=value float fields of CargoAircraftController
 //   FLOODUAV_TIME_LIMIT mission time limit, s
-//   FLOODUAV_SPLIT     1: split the 3920x720 screen (Layout below)
+//   FLOODUAV_SPLIT     1: split the 3920x720 screen (Layout below), or the offscreen texture of Capture.cs
 //   FLOODUAV_INFO      path of a JSON file with the boundary, start points, survivors and camera field of view
 //   FLOODUAV_FOLLOW    follow camera offset "x,y,z" behind the drone (build default 0,12,-40)
 //   FLOODUAV_FLEET     1: the pickup drone becomes a second drone the bridge flies (Fleet.cs)
@@ -79,6 +79,15 @@ namespace FloodPatch
 
         public static void Drone(MonoBehaviour controller)
         {
+            // With offscreen capture, MissionMapDisplay would open the mission map as a full-screen
+            // second window (macOS); drone OnEnable runs before its Start, so disable it here.
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FLOODUAV_CAPTURE")))
+            {
+                Type map = controller.GetType().Assembly.GetType("MBaske.MissionMapDisplay") ?? controller.GetType().Assembly.GetType("MissionMapDisplay");
+                if (map != null)
+                    foreach (UnityEngine.Object o in UnityEngine.Object.FindObjectsOfType(map))
+                        ((Behaviour)o).enabled = false;
+            }
             Component wing = controller.GetComponent("CargoAircraftController");
             if (!BuildLimits.ContainsKey(controller))
                 BuildLimits[controller] = new[] {
@@ -207,7 +216,7 @@ namespace FloodPatch
             cam.fieldOfView = fov;
             cam.nearClipPlane = near;
             cam.farClipPlane = Mathf.Max(main.farClipPlane, 2000f);
-            cam.targetTexture = null;
+            cam.targetTexture = Capture.Target;
             cam.rect = R(rect);
             cam.depth = depth;
             cam.enabled = true;
@@ -220,9 +229,13 @@ namespace FloodPatch
             Camera search = sensor == null ? null : Get(sensor, "searchCamera") as Camera;
             BoxCollider box = (BoxCollider)Get(mission, "searchBoundary");
             Camera main = Camera.main;
+            RenderTexture target = Capture.Setup((int)SW, (int)SH);   // null: on screen
             foreach (Camera c in Camera.allCameras)
                 if (c != search && c.targetTexture == null)
+                {
                     c.rect = R(Follow);
+                    c.targetTexture = target;
+                }
 
             if (search != null && main != null)
             {
@@ -256,6 +269,7 @@ namespace FloodPatch
             ov.nearClipPlane = 1f;
             ov.farClipPlane = b.size.y + 2000f;
             ov.rect = R(Overview);
+            ov.targetTexture = Capture.Target;
             ov.depth = 51f;
             overview = ov;
             Debug.Log("[FloodPatch] split views ready");
@@ -299,7 +313,7 @@ namespace FloodPatch
             finally
             {
                 RenderTexture.active = null;
-                overview.targetTexture = null;
+                overview.targetTexture = Capture.Target;
                 overview.rect = rect;
                 UnityEngine.Object.Destroy(rt);
                 UnityEngine.Object.Destroy(tex);

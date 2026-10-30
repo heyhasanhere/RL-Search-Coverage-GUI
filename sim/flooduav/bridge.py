@@ -34,13 +34,17 @@ setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
   GET  /map.jpg            one high resolution top-down render (--map-px), for the map background
 
 Mission frame: east = boundary +x, north = boundary +z, up = boundary +y, in meters, with the
-origin at the drone start point. Run with .venv-fly and DISPLAY set (sim/flooduav/run.sh).
+origin at the drone start point. Run with .venv-fly (sim/flooduav/run.sh).
+
+Video (--capture): "x11" grabs the screen regions of the player on DISPLAY (Linux, Xvfb);
+"file" reads the patch's offscreen frame file (patch/FloodPatch/Capture.cs; macOS, no X server).
 """
 
 import argparse
 import json
 import math
 import os
+import platform
 import queue
 import re
 import struct
@@ -70,12 +74,14 @@ SIM_DT = 0.1               # one decision = 5 physics steps of 0.02 s
 FENCE_S = 3.0              # the agent is steered back inside when it would leave the boundary within this time
 STUCK_S = 4.0              # the agent's drone is lifted when it moves under 0.5 m in this time (resting on a pipe or roof)
 ROOT = Path(__file__).resolve().parents[2]
+MACOS = platform.system() == "Darwin"
 
 # screen layout from Hook.SplitViews: follow view of drone 0, the two drone cameras stacked,
 # square overview, follow view of drone 1
 W, H = 3920, 720
 REGIONS = {"follow": (0, 0, 1280, 720), "cam0": (1280, 0, 640, 360), "cam1": (1280, 360, 640, 360),
            "overview": (1920, 0, 720, 720), "follow1": (2640, 0, 1280, 720)}
+FILE_W, FILE_H = 784, 200      # player window with --capture file: a preview; the views render offscreen
 SMALL_W, SMALL_FPS = 640, 6   # /stream/<region>?small=1
 AUD = b"\x00\x00\x01\x09"      # access unit delimiter: each H.264 frame starts with one
 NAL = re.compile(rb"\x00\x00\x01(.)", re.S)
@@ -215,15 +221,18 @@ class Unity:
             "FLOODUAV_MAP": args.map_file, "FLOODUAV_SURVIVOR_SEED": str(args.survivor_seed),
             "FLOODUAV_SURVIVOR_COUNT": str(args.survivor_count),
         })
+        if args.capture == "file":
+            os.environ.update({"FLOODUAV_CAPTURE": args.frames, "FLOODUAV_CAPTURE_FPS": str(args.fps)})
+        sw, sh = (W, H) if args.capture == "x11" else (FILE_W, FILE_H)
         Path(args.info).unlink(missing_ok=True)
         ch = EngineConfigurationChannel()
         self.fleet = FleetChannel()
         self.env = UnityEnvironment(
             file_name=args.build, no_graphics=False, worker_id=args.worker, timeout_wait=180,
             side_channels=[ch, self.fleet],
-            additional_args=["-screen-fullscreen", "0", "-screen-width", str(W), "-screen-height", str(H),
+            additional_args=["-screen-fullscreen", "0", "-screen-width", str(sw), "-screen-height", str(sh),
                              "-logFile", args.unity_log, *args.unity_args.split()])
-        ch.set_configuration_parameters(width=W, height=H, quality_level=args.quality,
+        ch.set_configuration_parameters(width=sw, height=sh, quality_level=args.quality,
                                         time_scale=args.time_scale, target_frame_rate=30)
         self.env.reset()
         # The search drone; the pickup drone has no remote behavior (Fleet.cs flies it).
@@ -498,11 +507,87 @@ class Unity:
         return None
 
 
-class Grabber:
-    """One ffmpeg x11grab per screen region, started on first use; keeps the latest JPEG."""
+class X11Source:
+    """ffmpeg grabs one screen region of the player on an X display (Xvfb)."""
 
-    def __init__(self, display: str, fps: int):
-        self.display, self.fps = display, fps
+    def __init__(self, display: str):
+        self.display = display
+
+    def popen(self, region, fps, out):
+        x, y, w, h = REGIONS[region]
+        cmd = ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(fps), "-video_size", f"{w}x{h}",
+               "-i", f"{self.display}+{x},{y}", *out]
+        return subprocess.Popen(cmd, stdout=subprocess.PIPE)
+
+
+class FileSource:
+    """Frames from the patch's offscreen capture file (Capture.cs): a 32-byte header (frame number, width,
+    height, slot), then two RGBA slots, bottom row first. ffmpeg gets one region's raw frames on stdin."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.cv = threading.Condition()
+        self.n, self.img = 0, None
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        mm, last = None, 0
+        while True:
+            time.sleep(0.03)
+            if mm is None:
+                try:
+                    mm = np.memmap(self.path, np.uint8, "r")
+                except (OSError, ValueError):
+                    continue
+            n, w, h, slot = struct.unpack_from("<qiii", mm, 0)
+            if n <= last or w <= 0:
+                if n < last:            # Unity started again with a new file
+                    mm, last = None, 0
+                continue
+            size = w * h * 4
+            if mm.size < 32 + 2 * size:
+                mm = None
+                continue
+            img = np.array(mm[32 + slot * size:32 + (slot + 1) * size]).reshape(h, w, 4)[::-1]
+            if struct.unpack_from("<q", mm, 0)[0] >= n + 2:     # the slot was written over while copying
+                continue
+            last = n
+            with self.cv:
+                self.n, self.img = self.n + 1, img
+                self.cv.notify_all()
+
+    def popen(self, region, fps, out):
+        x, y, w, h = REGIONS[region]
+        cmd = ["ffmpeg", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{w}x{h}",
+               "-framerate", str(fps), "-i", "pipe:0", *out]
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        threading.Thread(target=self._feed, args=(p, x, y, w, h, fps), daemon=True).start()
+        return p
+
+    def _feed(self, p, x, y, w, h, fps):
+        """Newest frames to ffmpeg, at most `fps` a second, until it exits."""
+        seen, next_t = 0, 0.0
+        try:
+            while p.poll() is None:
+                with self.cv:
+                    if not self.cv.wait_for(lambda: self.n > seen, 5.0):
+                        continue
+                    seen, img = self.n, self.img
+                if img.shape[0] < y + h or img.shape[1] < x + w:
+                    continue
+                p.stdin.write(np.ascontiguousarray(img[y:y + h, x:x + w]).tobytes())
+                p.stdin.flush()
+                next_t = max(next_t + 1.0 / fps, time.monotonic())
+                time.sleep(max(0.0, next_t - time.monotonic()))
+        except (BrokenPipeError, OSError):
+            pass
+
+
+class Grabber:
+    """One ffmpeg per screen region, started on first use; keeps the latest JPEG."""
+
+    def __init__(self, src, fps: int):
+        self.src, self.fps = src, fps
         self.frames: dict[str, bytes] = {}
         self.count: dict[str, int] = {}
         self.cv = threading.Condition()
@@ -517,13 +602,11 @@ class Grabber:
 
     def _run(self, name):
         region, small = name.partition("@")[::2]        # "<region>@small": scaled down, fewer frames
-        x, y, w, h = REGIONS[region]
+        w = REGIONS[region][2]
         fps = min(self.fps, SMALL_FPS) if small else self.fps
         scale = ["-vf", f"scale={min(w, SMALL_W)}:-2"] if small else []
-        cmd = ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(fps), "-video_size", f"{w}x{h}",
-               "-i", f"{self.display}+{x},{y}", *scale, "-f", "mjpeg", "-q:v", "5", "pipe:1"]
         while True:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            p = self.src.popen(region, fps, [*scale, "-f", "mjpeg", "-q:v", "5", "pipe:1"])
             buf = b""
             while chunk := p.stdout.read1(65536):     # what is there: a full read waits for 64 kB
                 buf += chunk
@@ -545,14 +628,18 @@ class Grabber:
 
 
 class H264:
-    """One ffmpeg x11grab and H.264 encoder per screen region while anyone watches it, shared by its viewers.
-    NVENC on the GPU, libx264 when NVENC fails. A new or lagging viewer waits for the next key frame (one a second)."""
+    """One ffmpeg H.264 encoder per screen region while anyone watches it, shared by its viewers.
+    NVENC on the GPU (VideoToolbox on macOS), libx264 when that fails. A new or lagging viewer waits
+    for the next key frame (one a second)."""
 
-    ENCODERS = (["h264_nvenc", "-preset", "p1", "-tune", "ll", "-bf", "0", "-aud", "1"],
-                ["libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-x264-params", "aud=1"])
+    # (encoder arguments, bitstream filters); each access unit must start with an AUD
+    X264 = (["libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-x264-params", "aud=1"], "dump_extra")
+    ENCODERS = ([(["h264_videotoolbox", "-realtime", "1", "-bf", "0"], "h264_metadata=aud=insert,dump_extra"), X264]
+                if MACOS else
+                [(["h264_nvenc", "-preset", "p1", "-tune", "ll", "-bf", "0", "-aud", "1"], "dump_extra"), X264])
 
-    def __init__(self, display: str, fps: int):
-        self.display, self.fps = display, fps
+    def __init__(self, src, fps: int):
+        self.src, self.fps = src, fps
         self.lock = threading.Lock()
         self.viewers: dict[str, list[dict]] = {}
         self.enc = 0
@@ -584,17 +671,15 @@ class H264:
                     v["key"] = True
 
     def _run(self, name):
-        x, y, w, h = REGIONS[name]
         while True:
             with self.lock:
                 if not self.viewers[name]:          # nobody watches: stop, the next viewer starts it again
                     del self.viewers[name]
                     return
-            enc = self.ENCODERS[self.enc]
-            cmd = ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(self.fps), "-video_size", f"{w}x{h}",
-                   "-i", f"{self.display}+{x},{y}", "-pix_fmt", "yuv420p", "-c:v", *enc, "-g", str(self.fps),
-                   "-b:v", "2M", "-maxrate", "2M", "-bufsize", "1M", "-bsf:v", "dump_extra", "-f", "h264", "pipe:1"]
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            enc, bsf = self.ENCODERS[self.enc]
+            p = self.src.popen(name, self.fps, ["-pix_fmt", "yuv420p", "-c:v", *enc, "-g", str(self.fps),
+                                                "-b:v", "2M", "-maxrate", "2M", "-bufsize", "1M", "-bsf:v", bsf,
+                                                "-f", "h264", "pipe:1"])
             buf, sent, stopped = b"", False, False
             while chunk := p.stdout.read1(65536):
                 buf += chunk
@@ -609,7 +694,7 @@ class H264:
             if stopped:
                 continue
             if not sent and self.enc + 1 < len(self.ENCODERS):
-                print(f"H.264 encoder {enc[0]} failed for {name}; trying {self.ENCODERS[self.enc + 1][0]}", flush=True)
+                print(f"H.264 encoder {enc[0]} failed for {name}; trying {self.ENCODERS[self.enc + 1][0][0]}", flush=True)
                 self.enc += 1
             elif not sent:
                 time.sleep(1.0)
@@ -760,7 +845,7 @@ def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--build", default="unity/SearchPickupPatched/FloodUAV.x86_64")
+    ap.add_argument("--build", default="unity/FloodUAVPatched.app" if MACOS else "unity/SearchPickupPatched/FloodUAV.x86_64")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8101)
     ap.add_argument("--worker", type=int, default=30, help="ML-Agents worker id (port 5005 + id)")
@@ -769,8 +854,11 @@ def main():
                     help="Unity time scale; keep it near --rate: above it, every rendered frame waits on many "
                          "Python steps and the video drops to a few frames per second")
     ap.add_argument("--quality", type=int, default=2)
-    ap.add_argument("--unity-args", default="-force-vulkan",
+    ap.add_argument("--unity-args", default="" if MACOS else "-force-vulkan",
                     help="extra player arguments; Vulkan renders on the NVIDIA GPU under Xvfb (OpenGL falls back to llvmpipe)")
+    ap.add_argument("--capture", choices=("x11", "file"), default="file" if MACOS else "x11",
+                    help="video source: x11 grabs the screen on --display; file reads the patch's offscreen frames")
+    ap.add_argument("--frames", default="/tmp/flooduav_frames.raw", help="frame file of --capture file")
     ap.add_argument("--max-speed", type=float, default=15.0, help="m/s, horizontal")
     ap.add_argument("--climb", type=float, default=4.0, help="m/s, vertical")
     ap.add_argument("--tilt", type=float, default=25.0, help="degrees; sets the horizontal acceleration")
@@ -800,10 +888,18 @@ def main():
     args = ap.parse_args()
 
     unity = Unity(args)
-    grab = Grabber(args.display, args.fps)
+    src = X11Source(args.display) if args.capture == "x11" else FileSource(args.frames)
+    grab = Grabber(src, args.fps)
     grab.ensure("overview")      # the UI asks for the map image right away; ffmpeg takes a few seconds to start
-    threading.Thread(target=unity.run, daemon=True).start()
-    srv = ThreadingHTTPServer((args.host, args.port), make_handler(unity, grab, H264(args.display, args.fps), args))
+    def step_loop():
+        try:
+            unity.run()
+        finally:              # Unity quit or crashed: stop, so the mission server sees the bridge gone
+            print("Unity stopped; the bridge exits", flush=True)
+            os._exit(1)
+
+    threading.Thread(target=step_loop, daemon=True).start()
+    srv = ThreadingHTTPServer((args.host, args.port), make_handler(unity, grab, H264(src, args.fps), args))
     print(f"FloodUAV bridge on http://{args.host}:{args.port}, start {unity.home.round(1).tolist()}", flush=True)
     srv.serve_forever()
 
