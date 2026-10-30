@@ -44,11 +44,11 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - Mission frame: east = boundary +x, north = +z, origin at the drone start. The lon/lat are made up (`MissionConfig.home`).
 - Heights: the drone never flies below 40 m above the start (bridges at about 12 m end the mission). The vehicle maps the 23 m search height to 40 m.
 - Landing is real: the drone descends straight down and keeps pushing down on the ground. Over open water (no ground within 150 m) it hovers instead.
-- Unity's visibility sensor confirms survivors up to 150 m away. The detector reports each found survivor near the drone, so the re-look confirms it.
 - If Unity ends its mission (collision or leaving the boundary), the drone resets to the start and the UI logs a warning.
-- Two drones under our control, 15 survivors by default (1-100, see Survivor positions). D2 has no sensor in the build: it detects survivors inside its camera footprint.
 - Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. It keeps the survivor positions. Speed cap: `POST /speed`. Follow target: `POST /view`.
 - Camera zoom and angle: `POST /camera` with `{"view": "follow", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
+- Detection: a drone detects every survivor inside its detection box, the box drawn around it on the map. The box is the downward camera's ground view from the bridge's `--min-alt` (46 x 82 m at 40 m) and keeps that size at any height. The rule uses the true survivor positions with no line of sight; Unity's own visibility sensor is not used.
+- Two drones under our control, 15 survivors by default (1-100, see Survivor positions). Both drones use the same detection box.
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
 - The build's mission map goes to a second display, which Xvfb does not have.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.

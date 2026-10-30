@@ -1,4 +1,4 @@
-"""FloodUAV backend: the two Unity drones as mission vehicles, and Unity's survivor finds as detections.
+"""FloodUAV backend: the two Unity drones as mission vehicles, and box detections of the true survivors.
 
 The Unity side runs in sim/flooduav/bridge.py: drone 0 is the build's search drone, drone 1
 its pickup drone. Positions are mission meters with the origin at the search drone's start
@@ -23,10 +23,13 @@ from sar.mission.vehicle import SimClock, Vehicle
 
 class FloodVehicle(Vehicle):
     def __init__(self, vid, clock: SimClock, bridge: str, alt_offset: float, camera_fov_deg: float = 60.0,
-                 aspect: float = 16 / 9):
+                 aspect: float = 16 / 9, view_alt: float = 40.0):
         super().__init__(vid, (0.0, 0.0), clock)
         self.bridge, self.alt_offset = bridge.rstrip("/"), alt_offset
-        self.fov, self.aspect = math.radians(camera_fov_deg), aspect
+        # the detection box: the downward camera's ground view from view_alt (Unity's fov is the
+        # vertical one, along-track), fixed whatever the drone's actual height
+        along = view_alt * math.tan(math.radians(camera_fov_deg) / 2)
+        self.box = [round(along, 1), round(along * aspect, 1)]
         self.client = httpx.AsyncClient(timeout=3.0)
         self.landed = True
         self.state: dict = {}           # this drone's part of the bridge state
@@ -108,34 +111,33 @@ class FloodVehicle(Vehicle):
         await self.client.post(f"{self.bridge}/speed", json={"speed": float(v)})
 
     def footprint_m(self):
-        """Half sizes of the downward camera's ground view; Unity's fov is the vertical one (along-track)."""
-        h = self.state.get("agl") or (self.tel.pos[2] + self.alt_offset if self.tel.in_air else 0.0)
-        along = max(float(h), 1.0) * math.tan(self.fov / 2)
-        return [round(along, 1), round(along * self.aspect, 1)]
+        """Half sizes of the detection box, m: [along-track, cross-track]."""
+        return self.box
+
+    def in_view(self, pos, yaw_deg, e, n):
+        """(e, n) inside footprint_m() around `pos`, along-track pointing to compass heading `yaw_deg`."""
+        along, cross = self.footprint_m()
+        h = math.radians(yaw_deg)
+        de, dn = e - pos[0], n - pos[1]
+        a = de * math.sin(h) + dn * math.cos(h)
+        c = de * math.cos(h) - dn * math.sin(h)
+        return abs(a) <= along and abs(c) <= cross
 
 
 class FloodDetector:
-    """Detections for both drones.
+    """Detections for both drones: every survivor inside the drone's detection box (footprint_m()).
 
-    The search drone (0) uses Unity's own finds: its visibility sensor confirms survivors up
-    to 150 m away, and look() reports each found survivor while that drone is within `radius`,
-    so a re-look from a displaced point sees it again and the orchestrator confirms it.
-    The pickup drone has no sensor in the build, so it sees the survivors inside its camera
-    footprint.
+    The rule uses the true survivor positions and no line of sight, so the box on the map is
+    exactly where a drone detects. Unity's own sensor is not used.
     """
 
-    def __init__(self, vehicles: list[FloodVehicle], truth_en, radius: float = 150.0):
-        self.vehicles, self.truth, self.radius = vehicles, np.asarray(truth_en, float), radius
+    def __init__(self, vehicles: list[FloodVehicle], truth_en):
+        self.vehicles, self.truth = vehicles, np.asarray(truth_en, float)
 
     async def look(self, drone_id, pos, yaw_deg):
         v = self.vehicles[drone_id]
-        if drone_id == 0:
-            return [Detection(float(f["e"]), float(f["n"]), 0.95, drone_id) for f in v.found
-                    if math.hypot(f["e"] - pos[0], f["n"] - pos[1]) <= self.radius]
-        along, cross = v.footprint_m()
-        r = min(along, cross)
         return [Detection(float(e), float(n), 0.9, drone_id) for e, n in self.truth
-                if math.hypot(e - pos[0], n - pos[1]) <= r]
+                if v.in_view(pos, yaw_deg, e, n)]
 
 
 def fetch_info(bridge: str) -> dict:

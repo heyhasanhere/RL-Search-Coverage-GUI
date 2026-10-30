@@ -85,7 +85,7 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     cfg = replace(cfg, accel=1.5, turn_speed=3.0)
     clock = BridgeClock(args.bridge_url)
     vehicles = [FloodVehicle(i, clock, args.bridge_url, alt_offset=info["min_alt"] - cfg.search_alt,
-                             camera_fov_deg=info.get("camera_fov", 60.0))
+                             camera_fov_deg=info.get("camera_fov", 60.0), view_alt=info["min_alt"])
                 for i in range(len(info.get("homes", [0])))]
     truth = np.array([[s["e"], s["n"]] for s in info["survivors"]], float)
 
