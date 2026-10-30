@@ -159,11 +159,13 @@ Later missions send it again.
 {"type": "event", "t": 12.0, "level": "info | warn | error", "text": "S1 candidate at ..."}
 ```
 
+Events are also written to the mission log, except "compiling the search policies (first mission only)", which is sent only to the UI.
+
 ## 4. Client to Server
 
 | `type` | Fields | Effect |
 |---|---|---|
-| `start_mission` | `polygon` ([lon, lat] ring), `lkp` (optional), `mode`, `n_search` (1-3), `expected_survivors`, `options`, `scenario`, `lkp_time_h`, `water_level_m`, `regions` | Builds the grid and prior, launches the search drones |
+| `start_mission` | `polygon` ([lon, lat] ring), `lkp` (optional), `mode`, `n_search` (1-3), `expected_survivors`, `options`, `scenario`, `lkp_time_h`, `water_level_m`, `regions` | Builds the grid and prior, launches the search drones. The first mission for a grid size first compiles the search policies in the background (up to about 30 s); the drones keep reporting meanwhile |
 | `stop_mission` | - | All drones return home |
 | `continue_mission` | - | Resumes a stopped or finished mission: belief, coverage and survivors are kept, the search drones take off again. Batteries are not recharged |
 | `restart_mission` | - | Resets the world and starts the last mission again |

@@ -5,6 +5,7 @@ the v2 `start_mission` fields, and the box drawing helper in sar.mission.video.
 """
 
 import asyncio
+import time
 
 from fastapi.testclient import TestClient
 import pytest
@@ -98,6 +99,10 @@ def test_start_mission_accepts_scenario_fields(client):
             "regions": [{"polygon": square(0.001), "weight": 0.3}],
             "options": {"auto_dispatch": True, "auto_replace": False, "auto_stage": False},
         })
+        # the policies compile in a worker thread before the mission starts
+        deadline = time.monotonic() + 120
+        while orch.state_msg()["mission"]["status"] != "running" and time.monotonic() < deadline:
+            time.sleep(0.1)
     state = orch.state_msg()
     assert state["mission"]["status"] == "running"
     # v2 drone fields are present on every drone.

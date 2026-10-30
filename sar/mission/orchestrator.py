@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import math
+import threading
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,6 +106,8 @@ class Orchestrator:
         self.detector = None
         self.truth_en = None
         self.policies: dict[int, SearchPolicy] = {}
+        self._warm_lock = threading.Lock()       # warm_policies runs in a worker thread
+        self._warm_grids: set[int] = set()
         self._link_grace = -1e9                  # no lost-link check before this time (after a stall)
         self.survivors: dict[int, Survivor] = {}
         self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False}
@@ -242,9 +245,7 @@ class Orchestrator:
             g = mask.shape[0]
             grid = AreaGrid.from_mask(self.frame, mask, cfg.cell_m, center_en=(0.0, 0.0))
         else:
-            e, n = self.frame.to_en(np.asarray(polygon)[:, 0], np.asarray(polygon)[:, 1])
-            extent = int(math.ceil(max(np.ptp(e), np.ptp(n)) / cfg.cell_m)) + 1
-            g = grid_for_extent(extent)
+            g = self._grid_size(polygon)
             grid = AreaGrid(self.frame, polygon, cfg.cell_m, g)
         lkp_en = self.en(lkp) if lkp is not None else None
         layers = {}
@@ -254,9 +255,7 @@ class Orchestrator:
             else:
                 layers = {"koester": koester_prior(grid, lkp_en)}
             prior = self._blend(grid, layers, regions)
-        if g not in self.policies:
-            self.policies[g] = SearchPolicy(g, self.ckpt_root, n_slots=3, seed=self.seed)
-        self.policy = self.policies[g]
+        self.policy = self._policy(g)
         self.mission = Mission(cfg, self.frame, grid, prior, float(expected_survivors), mode, lkp_en, self.now())
         # compile every mode now: a compile during flight would stall setpoint streaming
         for md in MODES:
@@ -422,6 +421,40 @@ class Orchestrator:
             views.append(AgentView(active=active, cell=cell, heading=d.heading if d is deciding else -1,
                                    battery=d.battery_s, confirming=d.confirming, seg=seg))
         return views
+
+    def _grid_size(self, polygon):
+        e, n = self.frame.to_en(np.asarray(polygon)[:, 0], np.asarray(polygon)[:, 1])
+        return grid_for_extent(int(math.ceil(max(np.ptp(e), np.ptp(n)) / self.cfg.cell_m)) + 1)
+
+    def _policy(self, g):
+        if g not in self.policies:
+            self.policies[g] = SearchPolicy(g, self.ckpt_root, n_slots=3, seed=self.seed)
+        return self.policies[g]
+
+    def warm_policies(self, g):
+        """Compile every search mode for grid size g on a sample state.
+
+        It runs in a worker thread before a mission starts: a JAX compile takes up to half a
+        minute, and on the event loop it would stop telemetry and trip the lost-link check.
+        """
+        with self._warm_lock:
+            if g in self._warm_grids:
+                return
+            pol, c = self._policy(g), (g // 2, g // 2)
+            mask = np.zeros((g, g), bool)
+            mask[1:-1, 1:-1] = True
+            belief = mask / mask.sum()
+            agents = [AgentView(active=i == 0, cell=c, battery=self.cfg.battery_s) for i in range(pol.n)]
+            args = (belief, mask, np.zeros((g, g)), agents, c, self.cfg.pd, 1.0, 0.0)
+            for md in MODES:
+                if md == "rl" and self.ckpt_root is None:
+                    continue
+                if md in MODES_V2:
+                    if get_policy_v2(g).available(md):
+                        get_policy_v2(g).decide(md, 0, *args)
+                else:
+                    pol.decide(md, 0, *args)
+            self._warm_grids.add(g)
 
     def _decide(self, d: Drone, from_cell, warm=False):
         m = self.mission
@@ -930,6 +963,12 @@ class Orchestrator:
         d = self.drones[int(msg["drone"])] if "drone" in msg else None
         s = self.survivors[int(msg["survivor"])] if msg.get("survivor") is not None else None
         if kind == "start_mission":
+            g = self._grid_size(msg["polygon"])
+            if g not in self._warm_grids:
+                # shown on the UI only: a log row before the mission row would split the replay
+                self._publish({"type": "event", "t": 0.0, "level": "info",
+                               "text": "compiling the search policies (first mission only)"})
+            await asyncio.to_thread(self.warm_policies, g)
             self.start_mission(polygon=msg["polygon"], lkp=msg.get("lkp"), mode=msg.get("mode", "rl"),
                                n_search=int(msg.get("n_search", 2)),
                                expected_survivors=float(msg.get("expected_survivors", 3.0)),
