@@ -5,13 +5,18 @@ interface Props {
   prior: PriorMsg | null;
   show: Set<string>;
   onToggle: (key: string) => void;
+  showBelief: boolean;
+  onBelief: (v: boolean) => void;
+  showCoverage: boolean;
+  onCoverage: (v: boolean) => void;
 }
 
 /**
- * Prior layer toggles (plan 11.3). The server sends one `prior` message per mission with a
- * base64 PNG per component plus the blend; each checkbox adds or removes that overlay.
+ * Map overlay toggles: belief, coverage and the prior layers. The server sends one `prior`
+ * message per mission with a base64 PNG per component plus the blend; each checkbox adds or
+ * removes that overlay.
  */
-export default function PriorPanel({ prior, show, onToggle }: Props) {
+export default function OverlaysPanel({ prior, show, onToggle, showBelief, onBelief, showCoverage, onCoverage }: Props) {
   // Open for a few seconds when a new prior arrives, then collapsed to its title until hovered.
   const [fresh, setFresh] = useState(false);
   useEffect(() => {
@@ -20,12 +25,18 @@ export default function PriorPanel({ prior, show, onToggle }: Props) {
     const timer = window.setTimeout(() => setFresh(false), 4000);
     return () => window.clearTimeout(timer);
   }, [prior]);
-  // Always shown, like the Draw bar; the toggles appear once a prior arrives.
   const keys = prior ? ["blend", ...prior.layers.map((l) => l.key)] : [];
   const label = (k: string) => (k === "blend" ? "Blend" : prior?.layers.find((l) => l.key === k)?.label ?? k);
   return (
     <div className={`prior-toggles autohide${fresh ? " open" : ""}`} onClick={(e) => e.stopPropagation()}>
-      <span className="autohide-title">Prior</span>
+      <span className="autohide-title">Overlays</span>
+      <label title="Probability that a survivor is in each cell, after the searching so far">
+        <input type="checkbox" checked={showBelief} onChange={(e) => onBelief(e.target.checked)} /> Belief
+      </label>
+      <label title="Cells the drone cameras have looked at">
+        <input type="checkbox" checked={showCoverage} onChange={(e) => onCoverage(e.target.checked)} /> Coverage
+      </label>
+      <span className="prior-sub">Prior</span>
       {!prior && <span className="prior-empty">No prior yet</span>}
       {keys.map((k) => (
         <label key={k} title={`Overlay the ${label(k)} prior layer`}>

@@ -220,7 +220,17 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 .video-hint { display: block; font-size: 10px; font-weight: 400; color: var(--muted); }
 .settings { position: relative; }
 .settings-menu {
-  position: fixed; top: 40px; right: 12px; z-index: 20; display: flex; flex-direction: column; gap: 6px;
+  position: fixed; top: 40px; right: 12px; z-index: 20; display: flex; flex-direction: column; gap: 6px; width: 340px;
+  max-height: calc(100vh - 52px); overflow-y: auto; white-space: normal;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; box-shadow: 0 4px 16px #000a;
 }
 .settings-menu label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+.settings-menu h3 { margin: 4px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.settings-menu h3 + * { margin-top: 0; }
+.settings-group { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.settings-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.settings-menu label.field, .settings-menu .mix-fields label { flex-direction: column; align-items: stretch; gap: 2px; color: var(--muted); }
+.settings-menu .mix-fields label { justify-content: flex-end; }
+.settings-menu .row { margin-top: 0; align-items: flex-end; }
+.settings-menu .row .field { flex: 1; }
+.prior-sub { font-size: 11px; color: var(--muted); border-left: 1px solid var(--line); padding-left: 8px; }

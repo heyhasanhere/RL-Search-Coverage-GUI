@@ -7,7 +7,8 @@ import DroneList from "./DroneList";
 import SurvivorList from "./SurvivorList";
 import EventLog from "./EventLog";
 import VideoPanel from "./VideoPanel";
-import PriorPanel from "./PriorPanel";
+import OverlaysPanel from "./OverlaysPanel";
+import { SettingsMenu, useMissionSettings } from "./MissionSettings";
 import RecordedVideo from "./RecordedVideo";
 import ReplayControls from "./ReplayControls";
 import OperatorLogin from "./OperatorLogin";
@@ -16,7 +17,6 @@ import { replayBeliefAt, replayEventsAt, replayPrior, replayStateAt } from "./re
 import type { LonLat, Region } from "./types";
 import { fmtTime } from "./types";
 
-const pct = (x: number | undefined) => (x == null || Number.isNaN(x) ? "-" : `${(x * 100).toFixed(0)}%`);
 const DEFAULT_REGION_WEIGHT = 0.3;
 const TRUTH_KEY = "sar.showTruth";
 
@@ -121,6 +121,7 @@ export default function App() {
   // Replay is read-only: nothing goes to the live server.
   const send = useMemo(() => (isReplay ? () => undefined : live.send), [isReplay, live.send]);
   const cv = useCameraViews(send);
+  const ms = useMissionSettings(config, live.state, live.send);
   const pickReplay = useCallback((id: string) => {
     setReplayId(id);
     setT(0);
@@ -178,8 +179,10 @@ export default function App() {
   const running = mission?.status === "running";
   const hasBridge = config?.bridge ?? false;
   const camDrone = selectedDrone ?? state?.drones[0]?.id ?? 0;
-  const openCandidates = state?.survivors.filter((s) => s.status === "candidate").length ?? 0;
-  const scenario = prior?.scenario ?? (config?.scenarios?.[0] ?? "wilderness");
+  const survivors = state?.survivors ?? [];
+  const openCandidates = survivors.filter((s) => s.status === "candidate").length;
+  const found = survivors.filter((s) => s.status === "confirmed" || s.status === "assigned" || s.status === "reached").length;
+  const rescued = survivors.filter((s) => s.status === "reached").length;
 
   const droneName = (k: number) => state?.drones.find((d) => d.id === k)?.name ?? `D${k}`;
   const followPane = (k: number) => {
@@ -265,19 +268,11 @@ export default function App() {
           ) : (
             <span className={`conn ${connected ? "on" : "off"}`}>{connected ? "connected" : "reconnecting"}</span>
           )}
-          {!isReplay && config?.login_required && <OperatorLogin live={live} />}
         </div>
-        <span>Scenario <b>{scenario}</b></span>
-        <span>Mission <b>{mission?.status ?? "-"}</b></span>
-        <span>Mode <b>{mission?.mode ?? "-"}</b></span>
         <span>Time <b>{fmtTime(state?.t)}</b></span>
-        <span>
-          Found <b>{mission ? mission.expected_found.toFixed(2) : "-"}</b>
-          {mission && <> / {mission.expected_total.toFixed(1)}</>}
-        </span>
-        <span>Candidates <b>{openCandidates}</b></span>
-        <span>Covered <b>{pct(mission?.covered_fraction)}</b></span>
-        <span>Remaining <b>{pct(mission?.remaining_fraction)}</b></span>
+        <span>Survivors found <b>{state ? found : "-"}</b></span>
+        <span>Rescued <b>{state ? rescued : "-"}</b></span>
+        <span>Candidates <b>{state ? openCandidates : "-"}</b></span>
         <div className="toggles">
           <button className={view === "live" ? "active" : ""} onClick={() => setView("live")} title="Live mission">
             Live
@@ -291,20 +286,14 @@ export default function App() {
               <option value="osm">OSM</option>
             </select>
           )}
-          <label><input type="checkbox" checked={showBelief} onChange={(e) => setShowBelief(e.target.checked)} /> Belief</label>
-          <label><input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} /> Coverage</label>
           <div className="settings">
             <button className={settingsOpen ? "active" : ""} onClick={() => setSettingsOpen((v) => !v)}>Settings</button>
             {settingsOpen && (
-              <div className="settings-menu">
-                <label title={state?.truth ? "Mark where the survivors really are" : "The server sends no ground truth (start it with --show-truth)"}>
-                  <input type="checkbox" checked={showTruth} disabled={!state?.truth}
-                    onChange={(e) => setShowTruth(e.target.checked)} />
-                  Show survivor truth on the map
-                </label>
-              </div>
+              <SettingsMenu config={config} state={state} ms={ms} send={send} readOnly={isReplay}
+                showTruth={showTruth} onShowTruth={setShowTruth} />
             )}
           </div>
+          {!isReplay && config?.login_required && <OperatorLogin live={live} />}
         </div>
       </header>
 
@@ -339,7 +328,8 @@ export default function App() {
           ) : (
             <div className="panel muted">Loading /api/config ...</div>
           )}
-          <PriorPanel prior={prior} show={showPrior} onToggle={togglePrior} />
+          <OverlaysPanel prior={prior} show={showPrior} onToggle={togglePrior}
+            showBelief={showBelief} onBelief={setShowBelief} showCoverage={showCoverage} onCoverage={setShowCoverage} />
         </div>
 
         <div className="bottomrow">
@@ -353,7 +343,7 @@ export default function App() {
                     onSeek={(v) => { setPlaying(false); setT(v); }} error={replay.error}
                   />
                 ) : (
-                  <MissionPanel config={config} state={state} polygon={polygon} lkp={lkp} regions={regions} send={send} />
+                  <MissionPanel config={config} state={state} polygon={polygon} lkp={lkp} regions={regions} ms={ms} send={send} />
                 )}
                 <DroneList
                   drones={state?.drones ?? []}

@@ -49,7 +49,7 @@ const { chromium } = require("playwright");
   await page.click("button:has-text('Edit')");
 
   // Turn on the prior blend overlay if the server sent one.
-  const priorToggle = page.locator(".prior-toggles input[type=checkbox]").first();
+  const priorToggle = page.locator(".prior-toggles label[title^=\"Overlay the\"] input").first();
   if (await priorToggle.count()) {
     await priorToggle.check({ force: true });
     await page.waitForTimeout(300);
