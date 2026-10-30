@@ -377,9 +377,12 @@ class Unity:
         err = tgt - d.pos
         # Approach speed limited by the braking distance: the drone brakes at about
         # g*tan(tilt) at best, and a plain P gain overshoots and swings around the target.
-        dist = float(np.hypot(*err[:2]))
+        # Unity's velocity loop lags (about 0.4 s, then a 1.7 s time constant), so the
+        # horizontal error is taken from where the drone will be `lead` seconds ahead.
+        herr = err[:2] - d.vel[:2] * a.lead
+        dist = float(np.hypot(*herr))
         cap = 3.0 if landing else self.speed_cap
-        v = ff[:2] + (err[:2] / dist * min(a.kp * dist, math.sqrt(2 * a.brake * dist)) if dist > 1e-3 else 0.0)
+        v = ff[:2] + (herr / dist * min(a.kp * dist, math.sqrt(2 * a.brake * dist)) if dist > 1e-3 else 0.0)
         sp = float(np.hypot(*v))
         if sp > cap:
             v *= cap / sp
@@ -651,7 +654,7 @@ def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
                                    "survivor_seed": sc.info.get("survivor_seed", -1),
                                    "survivor_shares": sc.info.get("survivor_shares"),
                                    "limits": {"lo": sc.lo.tolist(), "hi": sc.hi.tolist()},
-                                   "min_alt": args.min_alt, "max_speed": args.max_speed,
+                                   "min_alt": args.min_alt, "max_speed": args.max_speed, "lead": args.lead,
                                    **agent_list()})
             if path == "/map.jpg":
                 if "map" not in maps:
@@ -774,6 +777,8 @@ def main():
     ap.add_argument("--wing-area", type=float, default=1.0, help="m2; the build's 100 caps the speed near 2.5 m/s")
     ap.add_argument("--kp", type=float, default=0.5, help="position gain, 1/s")
     ap.add_argument("--brake", type=float, default=1.5, help="planned braking deceleration, m/s2")
+    ap.add_argument("--lead", type=float, default=1.5,
+                    help="s; the setpoint controller steers from the drone's position this far ahead, which damps the swing")
     ap.add_argument("--min-alt", type=float, default=40.0, help="m above the start point; below about 15 m it hits bridges")
     ap.add_argument("--max-alt", type=float, default=80.0)
     ap.add_argument("--margin", type=float, default=0.03, help="fraction of the boundary kept clear (leaving it ends the mission)")

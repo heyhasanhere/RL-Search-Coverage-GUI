@@ -84,7 +84,8 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     cfg = replace(cfg, accel=1.5, turn_speed=3.0)
     clock = BridgeClock(args.bridge_url)
     vehicles = [FloodVehicle(i, clock, args.bridge_url, alt_offset=info["min_alt"] - cfg.search_alt,
-                             camera_fov_deg=info.get("camera_fov", 60.0), view_alt=info["min_alt"])
+                             camera_fov_deg=info.get("camera_fov", 60.0), view_alt=info["min_alt"],
+                             track_lead=info.get("lead", 0.0))
                 for i in range(len(info.get("homes", [0])))]
     # drone 0 is the build's search drone: the bridge can fly it with the build's trained agent
     vehicles[0].agent_capable = bool(info.get("onnx"))

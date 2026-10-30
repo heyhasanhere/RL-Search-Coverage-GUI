@@ -102,6 +102,8 @@ class Telemetry:
 class Vehicle:
     """Base class. Subclasses implement the async commands."""
 
+    track_lead = 0.0      # s: a moving setpoint is followed this many seconds of the vehicle's speed behind
+
     def __init__(self, vid: int, home_en, clock: SimClock):
         self.id = vid
         self.home = np.array([home_en[0], home_en[1], 0.0])

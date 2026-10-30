@@ -50,6 +50,10 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
   The search coverage and belief use the same box: a look counts every cell whose center is inside it, once per pass (`docs/PROTOCOL.md` section 4.3).
 - `rl_unity` mode: search drones never switch to rescue on their own (`auto_switch` is skipped). The operator dispatches by hand.
 - If a drone leaves the boundary (sides or top, about 83 m above the start), Unity ends its mission and freezes both drones. Stop and Recall cannot move them then; Reset puts them back on their pads. Collisions do not end the mission (`FLOODUAV_SOFT`).
+- Setpoint flight: Unity's drone follows a speed command about 0.4 s late and then takes about 1.7 s to reach it, and it brakes at about 4 m/s2 at most (25 degree tilt).
+  The bridge steers from where the drone will be `--lead` seconds ahead (default 1.5), so it brakes early and does not swing around a stop or a turn.
+  The drone trails a moving setpoint by about its speed x `--lead`. `GET /info` reports `lead`, and the mission server allows that trailing before it pauses the path.
+- Top speed: the drone reaches about 14 m/s at most, even with a higher `--max-speed`. With a 15 m/s cap it flies about 10-11 m/s and stays within about 5 m of the path; above that it drifts up to about 9 m off the path.
 - Commands to the bridge are sent up to 3 times before the drone's task fails.
 - Lost link: a flying drone with no position update for 3 s is reported lost and aborted. After a pause of the mission server, the check waits one more 3 s first.
 - Two drones under our control, 15 survivors by default (1-100, see Survivor positions). Both drones use the same detection box.

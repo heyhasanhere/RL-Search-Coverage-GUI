@@ -645,7 +645,9 @@ class Orchestrator:
             # tens of metres over the hills and would freeze the carrot for good
             lag = float(np.linalg.norm(sp[:2] - v.tel.pos[:2]))
             blocked = self._sense(d, dt)
-            adv = 0.0 if blocked or lag > max(8.0, spd * 1.5) else spd * dt
+            # a vehicle that steers from where it will be (track_lead) trails by that much of its speed
+            guard = max(8.0, spd * 1.5) + v.track_lead * float(np.hypot(*v.tel.vel[:2]))
+            adv = 0.0 if blocked or lag > guard else spd * dt
             # while the carrot waits for the drone it starts again from the drone's speed, not its own
             d.carrot_v = spd if adv > 0 else min(spd, float(np.hypot(*v.tel.vel[:2])))
             step = min(adv, L)

@@ -26,8 +26,9 @@ from sar.mission.vehicle import SimClock, Vehicle
 
 class FloodVehicle(Vehicle):
     def __init__(self, vid, clock: SimClock, bridge: str, alt_offset: float, camera_fov_deg: float = 60.0,
-                 aspect: float = 16 / 9, view_alt: float = 40.0):
+                 aspect: float = 16 / 9, view_alt: float = 40.0, track_lead: float = 0.0):
         super().__init__(vid, (0.0, 0.0), clock)
+        self.track_lead = track_lead    # the bridge steers from the drone's position this far ahead
         self.bridge, self.alt_offset = bridge.rstrip("/"), alt_offset
         # the detection box: the downward camera's ground view from view_alt (Unity's fov is the
         # vertical one, along-track), fixed whatever the drone's actual height
