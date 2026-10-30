@@ -208,3 +208,13 @@ def test_cells_builder_follows_survivor_mix():
     assert np.allclose(blend({**roofs, "roofs": 0.0, "bridges": 1.0}), 0.25)
     assert np.isclose(blend(None).sum(), 1.0)       # an old patch without survivor_shares: the default mix
 
+
+def test_cells_prior_dry_roof_is_roof_not_high_ground():
+    from types import SimpleNamespace
+    from sar.prior.flood_bank import cells_prior
+    # 2 x 2 grid, one sample each: dry roof, dry, flooded roof, water
+    grid = SimpleNamespace(e0=0.0, n0=20.0, cell=10.0, g=2, mask=np.ones((2, 2), bool))
+    cells = {"origin_en": [5.0, 15.0], "di_en": [10.0, 0.0], "dj_en": [0.0, -10.0], "nx": 2, "nz": 2, "types": "h.rw"}
+    p = cells_prior(cells, grid)
+    assert p["roofs"][0, 0] > 0 and p["roofs"][1, 0] > 0
+    assert p["high_ground"][0, 0] == 0.0 and p["high_ground"][0, 1] > 0

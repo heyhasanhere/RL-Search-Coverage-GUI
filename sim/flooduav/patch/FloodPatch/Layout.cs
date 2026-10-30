@@ -1,7 +1,7 @@
 // Survivor positions and scene cell types (sim/flooduav/README.md).
-//   roof         50%  tops of flooded buildings above the water
 // Seed < 0 keeps the build's fixed survivors. Any other seed scatters them by the survivor terrain
 // mix, by default the flood survivor shares of sar/prior/flood_bank.py (nobody inside a building):
+//   roof         50%  building tops above the water, flooded or dry
 //   high ground  25%  dry ground near the flood edge, weight exp(-d^2 / 2 sigma^2), dry islands doubled
 //   bridge       10%  bridge decks above the water
 //   water        10%  in open flood water, upper body above the surface
@@ -14,7 +14,9 @@
 //
 // Cell types: the area is sampled every 10 m once, and each sample gets one character (CellTypes):
 //   .  dry ground      w  flood water        r  flooded building, roof above the water
-//   s  submerged building   b  bridge deck above the water   h  dry building   o  nothing hit
+//   s  submerged building   b  bridge deck above the water   h  dry building roof   o  nothing hit
+// Roofs are the tops of house pieces (any slope) and bridges are pieces named "bridge"; walls, fences,
+// barriers and props are looked through. Roof survivors go on r and h, on a flat spot.
 // The info file carries them, and the mission server builds the flood prior from them.
 //
 // Environment variables (optional):
@@ -44,7 +46,6 @@ namespace FloodPatch
         const float HighReach = 240f;      // HIGH_REACH_CELLS x 30 m: dry ground further from the flood gets nothing
         const float IslandBonus = 2f;      // ISLAND_BONUS: dry islands hold people who cannot walk out
         const float MinStructure = 2.5f;   // structure top above the ground below it
-        const float MinSlopeCos = 0.75f;   // steepest surface a person stands on (about 40 degrees)
         const float Spacing = 10f;         // between survivors; more than the mission's 8 m merge distance
         const float PadClear = 25f;        // kept clear around the drone pads
         const float Margin = 0.05f;        // fraction of the boundary kept clear on each side
@@ -242,20 +243,58 @@ namespace FloodPatch
             return false;
         }
 
+        // Pieces of a house: the Flooded_Grounds building prefabs (Prefabs/Buildings, not Structures1 or Bridge).
+        static readonly string[] HousePrefixes = {
+            "Barn", "BrickHouse", "Cabin", "Outhouse", "Church", "GreenHouse", "GuardHouse",
+            "IndBuilding", "LightHouse", "Villa" };
+
+        static bool IsHouse(Transform t)
+        {
+            for (; t != null; t = t.parent)
+                foreach (string s in HousePrefixes)
+                    if (t.name.StartsWith(s, StringComparison.OrdinalIgnoreCase))
+                        return true;
+            return false;
+        }
+
         // Cell type of the outdoor surface at (x, z) world; `at` is that surface (or the water surface).
+        // The top house or bridge piece decides; walls, fences, barriers, props and blocker colliders are
+        // looked through, so the deck, roof, ground or water under them counts.
         static char Classify(float x, float z, float top, out Vector3 at)
         {
-            RaycastHit hit, g;
+            RaycastHit g;
             at = new Vector3(x, 0f, z);
-            if (!Physics.Raycast(new Vector3(x, top, z), Vector3.down, out hit, 2000f, topMask, QueryTriggerInteraction.Ignore))
+            RaycastHit[] hits = Physics.RaycastAll(new Vector3(x, top, z), Vector3.down, 2000f, topMask, QueryTriggerInteraction.Ignore);
+            if (hits.Length == 0)
                 return 'o';
-            at = hit.point;
+            Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
             float wl = WaterAt(x, z);
             bool hasGround = Physics.Raycast(new Vector3(x, top, z), Vector3.down, out g, 2000f, groundMask, QueryTriggerInteraction.Ignore);
-            float ground = hasGround ? g.point.y : hit.point.y;
-            bool onGround = hit.collider.gameObject.layer == LayerMask.NameToLayer("Ground");
-            if (onGround || hit.point.y - ground < MinStructure)
+            float ground = hasGround ? g.point.y : hits[hits.Length - 1].point.y;
+            bool flooded = ground < wl;
+            int groundLayer = LayerMask.NameToLayer("Ground");
+            foreach (RaycastHit hit in hits)
             {
+                at = hit.point;
+                bool above = hit.point.y >= wl + Freeboard;
+                if (IsBridge(hit.collider.transform))
+                {
+                    if (!flooded)
+                        return '.';           // an elevated road over dry land is a road
+                    if (above)
+                        return 'b';
+                    at.y = wl;
+                    return 'w';
+                }
+                if (IsHouse(hit.collider.transform))
+                {
+                    if (above)
+                        return flooded ? 'r' : 'h';
+                    if (flooded)
+                        return 's';
+                }
+                else if (hit.collider.gameObject.layer != groundLayer && hit.point.y - ground >= MinStructure)
+                    continue;                 // a wall, fence, barrier or prop: look under it
                 if (hit.point.y < wl)
                 {
                     at.y = wl;
@@ -263,29 +302,13 @@ namespace FloodPatch
                 }
                 return '.';
             }
-            bool above = hit.point.y >= wl + Freeboard;
-            bool flooded = ground < wl;
-            // walls, fences and pitched edges: nobody stands there, the cell below counts
-            bool standable = hit.normal.y >= MinSlopeCos && Flat(hit.point);
-            if (IsBridge(hit.collider.transform))
+            at = hasGround ? g.point : at;
+            if (at.y < wl)
             {
-                if (!flooded)
-                    return '.';           // an elevated road over dry land is a road
-                if (above && standable)
-                    return 'b';
                 at.y = wl;
                 return 'w';
             }
-            if (flooded)
-            {
-                if (!above)
-                    return 's';
-                if (standable)
-                    return 'r';
-                at.y = wl;
-                return 'w';
-            }
-            return 'h';
+            return '.';
         }
 
         static void SampleCells(MonoBehaviour mission)
@@ -314,7 +337,7 @@ namespace FloodPatch
                     counts[c]++;
                 }
             Debug.Log(string.Format(CultureInfo.InvariantCulture,
-                "[FloodPatch] cell types {0}x{1}: dry {2}, water {3}, roof {4}, submerged {5}, bridge {6}, dry building {7}, none {8}, {9} ms",
+                "[FloodPatch] cell types {0}x{1}: dry {2}, water {3}, roof {4}, submerged {5}, bridge {6}, dry roof {7}, none {8}, {9} ms",
                 sampleNx, sampleNz, counts['.'], counts['w'], counts['r'], counts['s'], counts['b'], counts['h'], counts['o'],
                 Mathf.RoundToInt((Time.realtimeSinceStartup - t0) * 1000f)));
         }
@@ -360,7 +383,7 @@ namespace FloodPatch
                     int idx = j * sampleNx + i;
                     char c = cellTypes[idx];
                     for (int k = 0; k < Kinds.Length; k++)
-                        if (KindCells[k] == c || (KindCells[k] == '*' && c != 'o' && c != 's'))
+                        if (IsKind(k, c))
                             cand[k].Add(idx);
                 }
             Pose[] result = new Pose[n];
@@ -385,7 +408,7 @@ namespace FloodPatch
                     Vector3 w = bt.TransformPoint(local);
                     Vector3 at;
                     char c = Classify(w.x, w.z, top, out at);
-                    if (c == 'o' || c == 's' || (KindCells[kind] != '*' && c != KindCells[kind]))
+                    if (!IsKind(kind, c))
                         continue;
                     if (Near(at, pads, PadClear) || Near(at, placed, Spacing))
                         continue;
@@ -419,6 +442,14 @@ namespace FloodPatch
                 "[FloodPatch] survivor layout seed {0}, {1} survivors: {2} roof, {3} high ground, {4} bridge, {5} water, {6} random, {7} not placed, {8} ms",
                 s, n, got[0], got[1], got[2], got[3], got[4], kept, Mathf.RoundToInt((Time.realtimeSinceStartup - t0) * 1000f)));
             return result;
+        }
+
+        // Whether a sample of cell type `c` can hold a survivor of kind `k`.
+        static bool IsKind(int k, char c)
+        {
+            if (KindCells[k] == '*')
+                return c != 'o' && c != 's';
+            return c == KindCells[k] || (KindCells[k] == 'r' && c == 'h');
         }
 
         static bool Near(Vector3 p, IEnumerable<Vector3> others, float d)

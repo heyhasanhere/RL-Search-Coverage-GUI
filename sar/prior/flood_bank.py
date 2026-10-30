@@ -4,7 +4,7 @@ A flood prior here is a mix of five components over 30 m cells:
 
 | Key | Who | Cells |
 |---|---|---|
-| `roofs` | People on the roofs of flooded buildings | Flooded buildings whose roof is above water |
+| `roofs` | People on roofs | Building roofs above water: flooded buildings, and dry ones in a simulator scene |
 | `high_ground` | People who left flooded buildings | Dry cells near the flood, islands doubled |
 | `bridges` | People on bridges | Road cells over the normal river |
 | `water` | People caught in the water | Flooded cells off the river, next to a road first |
@@ -52,7 +52,7 @@ def cell_components(roof, flooded_bld, flooded, bridge, road, river):
     dry = ~flooded
     spread = ndi.gaussian_filter(np.asarray(flooded_bld, np.float64), HIGH_SIGMA_CELLS, mode="constant")
     near = ndi.distance_transform_edt(dry) <= HIGH_REACH_CELLS
-    high = np.where(dry & near, spread, 0.0) * np.where(_islands(dry), ISLAND_BONUS, 1.0)
+    high = np.where(dry & near & ~(roof_w > 0), spread, 0.0) * np.where(_islands(dry), ISLAND_BONUS, 1.0)
     wet = flooded & ~river & ~(roof_w > 0) & ~(bridge_w > 0)
     by_road = ndi.binary_dilation(road, iterations=1)
     water = wet * np.where(by_road, WATER_ROAD_WEIGHT, 1.0)
@@ -97,7 +97,7 @@ def cells_on_grid(cells, grid):
 def cells_prior(cells, grid, shares=SHARES):
     """Flood prior components on the mission grid from scene cell types."""
     f, count = cells_on_grid(cells, grid)
-    roof, bridge = f["r"], f["b"]
+    roof, bridge = f["r"] + f["h"], f["b"]           # dry roofs (h) are roofs too
     fb = (f["r"] + f["s"]) > 0
     flooded = (f["w"] + f["r"] + f["s"] + f["b"]) >= 0.5
     zero = np.zeros_like(flooded)

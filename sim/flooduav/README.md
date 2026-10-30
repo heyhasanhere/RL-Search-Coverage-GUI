@@ -60,16 +60,35 @@ The build has 15 fixed survivors. The patch (`patch/FloodPatch/Layout.cs`) can m
 
 - The UI button New survivors (or `POST /survivors` on the bridge) resets the mission and makes a new random layout. Reset and Restart keep it.
 - Survivors in map (next to Expected survivors) sets how many survivors New survivors places, 1-100. Fewer than 15 hides some of the build's survivors; more adds copies of its first survivor (`Survivor_016` and on).
+- Survivor terrain mix (below Survivors in map) sets how likely each survivor lands on each kind in the table below. It is five percent fields, by default 50 / 25 / 10 / 10 / 5, normalized to 100%. New survivors uses it, and the search prior uses the same mix.
 - The same seed gives the same layout. Start with one: `sim/flooduav/run.sh up --survivor-seed 7 --survivor-count 30`. The defaults `-1` keep the build's 15 survivors. With the build's layout the count can only go down.
-- Survivors stand only on dry surfaces at least 0.5 m above the water plane, at least 10 m apart and 25 m from the drone pads.
+- Survivors stand at least 10 m apart and 25 m from the drone pads. Nobody is inside a building.
 
-The layout follows the flood survivor model of `sar/prior/flood.py` without its water component:
+At the first mission start the patch samples the search area every 10 m and gives each sample a cell type:
 
-| Kind | Share | Where |
+| Code | Cell type |
+|---|---|
+| `.` | Dry ground (an elevated road over dry land counts as ground) |
+| `w` | Flood water |
+| `r` | Flooded house whose roof (any slope) is at least 0.5 m above the water |
+| `s` | Building under water |
+| `b` | Bridge deck (an object named "bridge") over the flood, at least 0.5 m above the water |
+| `h` | Roof of a dry house; roof survivors and the roof prior use it like `r` |
+| `o` | Nothing hit |
+
+Houses are the building prefabs of the scene (barns, cabins, churches, villas, industrial buildings and so on). Walls, fences, flood barriers, props and invisible blockers are looked through, so the house, bridge, ground or water under them sets the type.
+
+The layout uses the survivor terrain mix. The default is the shares of `sar/prior/flood_bank.py`:
+
+| Kind | Default share | Where |
 |---|---|---|
-| Roof | 0.60 / 0.85 = 71% | Top of a structure at least 2.5 m above the ground, standing in the flood or within 30 m of it (house roofs, bridges) |
-| High ground | 0.25 / 0.85 = 29% | Dry ground, weight `exp(-d^2 / (2 * 90^2))` by the distance `d` to the flood, none beyond 240 m, doubled on dry islands |
+| Roof | 50% | An `r` sample, on a flat spot |
+| High ground | 25% | A `.` sample, weight `exp(-d^2 / (2 * 90^2))` by the distance `d` to the flood, none beyond 240 m, doubled on dry islands |
+| Bridge | 10% | A `b` sample, on a flat spot |
+| Water | 10% | A `w` sample, standing 0.6 m below the water surface |
+| Random | 5% | Any sample except `o` and `s` |
 
-The shares are hand-set, as in the flood prior: there is no case data to fit them.
-`GET /info` reports the layout seed (`survivor_seed`); the patch's info file also gives each survivor's kind.
+A kind the scene has no samples of gives its share to the others. A mix of only such kinds places the survivors anywhere, like Random. The default shares are hand-set: there is no case data to fit them.
+`GET /info` reports the layout seed (`survivor_seed`), the terrain mix (`survivor_shares`), each survivor's kind (`kinds`) and the cell types (`cells`).
+The mission server builds the flood prior from the cell types with the same mix, so the operator does not mark area types.
 
