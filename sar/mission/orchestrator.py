@@ -133,8 +133,8 @@ class Orchestrator:
         self.on_restart = None                   # optional async callback: reset the sim world
         self.on_new_survivors = None             # optional async callback(count, mix): new survivor layout, returns (seed, count)
         self.drone_speed: float | None = None    # operator speed cap, m/s; None: vehicle default
-        # AGENT_MODE flight limits: "training" (the agent's own, speed cap off) or "bridge" (the operator's)
-        self.agent_limits = "training"
+        # AGENT_MODE flight limits: "bridge" (the operator's speed cap) or "training" (the agent's own, speed cap off)
+        self.agent_limits = "bridge"
         # AGENT_MODE trained agents ({"id", "label"}) and the one that flies; set by the backend
         self.agents: list[dict] = []
         self.agent: str | None = None
@@ -1185,8 +1185,6 @@ class Orchestrator:
             old, self.mission.mode = self.mission.mode, msg["mode"]
             self.event(f"search mode: {msg['mode']}")
             if (old == AGENT_MODE) != (msg["mode"] == AGENT_MODE):
-                if msg["mode"] == AGENT_MODE:
-                    self.agent_limits = "training"
                 # the agent takes over a searching drone, or hands it back to the planner
                 for o in self.drones:
                     if o.state == "SEARCH" and getattr(o.vehicle, "agent_capable", False):

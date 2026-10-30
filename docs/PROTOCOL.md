@@ -61,6 +61,7 @@ In `rl_unity` the agent flies D1 and the other search drones use `rl`; the UI de
 `agents` lists the agents as `{"id", "label"}`; the state message reports the one that flies as `agent`.
 Each `GET /api/config` rescans the bridge, so models dropped into `models/` appear in the list.
 The agent cannot fly a re-look, so its finds are confirmed at once.
+`scenarios` lists the scenarios the backend supports (FloodUAV: `flood` only); the UI starts missions with the first one.
 
 ## 3. Server to Client
 
@@ -159,7 +160,7 @@ Section 4.3 (Coverage) gives the rule.
 | `corners` | Same order and meaning as in `belief`. Every PNG covers this rectangle. |
 | `nx`, `ny` | Grid size in cells. Each PNG is `nx` by `ny` pixels, one pixel per cell. |
 | `cell_m` | Cell size in meters. |
-| `scenario` | `wilderness` or `flood`. The status bar shows it. |
+| `scenario` | `wilderness` or `flood`: the scenario this prior is for. |
 | `blend` | The weighted mix of all components. Always present. |
 | `layers` | One entry per prior component. Empty is allowed when the server has no fitted prior yet. |
 
@@ -189,9 +190,9 @@ Events are also written to the mission log, except "preparing the search policie
 | `restart_mission` | - | Resets the world and starts the last mission again |
 | `reset_mission` | - | Resets the world to before the start and does not start: drones on their pads, batteries full, survivors cleared, survivor numbers start again at 1 |
 | `new_survivors` | `count` (1-100, optional, default the build's 15), `mix` (optional) | FloodUAV only (`survivor_layouts` in the config): `reset_mission`, then `count` survivors at new random positions in Unity. Later resets keep them. `mix` is the survivor terrain mix: weights 0 or more for `roofs`, `high_ground`, `bridges`, `water`, `uniform` (missing keys are 0, not all 0), normalized; without it the default 50 / 25 / 10 / 10 / 5. The flood prior of later missions uses the same mix. An event names the count, the layout seed and the mix |
-| `set_mode` | `mode` | Changes the search mode mid-mission. Switching into `rl_unity` resets the agent flight limits to `training` |
+| `set_mode` | `mode` | Changes the search mode mid-mission |
 | `set_agent` | `agent` (an `agents` id) | `rl_unity` only. Picks the trained agent that flies D1, also mid-mission |
-| `set_agent_limits` | `limits` (`training` or `bridge`) | `rl_unity` only. `training` (default): the agent flies with the limits it was trained with, and the drone speed cap is off. `bridge`: the operator's speed cap applies. The state message reports it as `agent_limits` |
+| `set_agent_limits` | `limits` (`training` or `bridge`) | `rl_unity` only. `bridge` (default): the operator's speed cap applies. `training`: the agent flies with the limits it was trained with, and the drone speed cap is off. The UI does not offer `training`. The state message reports it as `agent_limits` |
 | `set_drone_speed` | `speed` (m/s, above 0) | Horizontal speed cap for all drones, also mid-mission. The state message reports it as `drone_speed` (null: each vehicle's own limit). The UI sends it on Start: 15 m/s, or 3 m/s in `rl_unity` |
 | `recall` | `drone` | Drone returns home (RETURNING) |
 | `standby` | `drone`, `point` ([lon, lat], optional, default home) | Drone parks at the point (STANDBY) |

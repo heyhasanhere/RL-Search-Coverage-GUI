@@ -384,9 +384,9 @@ def test_agent_mode_flies_and_hands_back():
             orch.start_mission(polygon=square(), lkp=list(HOME), mode="rl_unity", n_search=1)
             d = orch.drones[0]
             assert await run_until(orch, lambda: d.agent, 30)
-            assert d.task_text == "searching (Unity agent)" and vs[0].agent_calls == ["training"]
-            await orch.command({"type": "set_agent_limits", "limits": "bridge"})
-            assert vs[0].agent_calls[-1] == "bridge" and orch.state_msg()["agent_limits"] == "bridge"
+            assert d.task_text == "searching (Unity agent)" and vs[0].agent_calls == ["bridge"]
+            await orch.command({"type": "set_agent_limits", "limits": "training"})
+            assert vs[0].agent_calls[-1] == "training" and orch.state_msg()["agent_limits"] == "training"
             orch.agents, orch.agent = [{"id": "ppo", "label": "PPO 19M"}, {"id": "dqn", "label": "DQN 5M"}], "ppo"
             await orch.command({"type": "set_agent", "agent": "dqn"})
             assert vs[0].agent_names[-1] == "dqn" and orch.state_msg()["agent"] == "dqn"
