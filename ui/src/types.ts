@@ -82,6 +82,8 @@ export interface Options {
   auto_replace: boolean;
   auto_stage: boolean;
   auto_switch: boolean;
+  /** Fly a re-look from a displaced viewpoint before confirming a candidate; off: confirm on the first detection. */
+  relook: boolean;
 }
 
 export interface Mission {
@@ -332,7 +334,7 @@ export type ClientMsg =
   | { type: "dispatch"; drone: number; survivor: number }
   | { type: "confirm"; survivor: number }
   | { type: "reject"; survivor: number }
-  | { type: "set_options"; auto_dispatch?: boolean; auto_replace?: boolean; auto_stage?: boolean; auto_switch?: boolean }
+  | { type: "set_options"; auto_dispatch?: boolean; auto_replace?: boolean; auto_stage?: boolean; auto_switch?: boolean; relook?: boolean }
   | { type: "set_speed"; speed: number }
   /** v2: points the follow camera and the camera panel. */
   | { type: "select"; drone?: number; survivor?: number }

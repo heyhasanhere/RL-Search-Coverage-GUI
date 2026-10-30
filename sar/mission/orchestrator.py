@@ -118,7 +118,8 @@ class Orchestrator:
         self._warm_grids: set[int] = set()
         self._link_grace = -1e9                  # no lost-link check before this time (after a stall)
         self.survivors: dict[int, Survivor] = {}
-        self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False, "auto_switch": True}
+        self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False, "auto_switch": True,
+                        "relook": True}           # relook: fly a re-look before confirming a candidate
         self.events: list[dict] = []
         self.subscribers: list[asyncio.Queue] = []
         self._next_sid = 1          # survivor numbers start at 1 in every mission
@@ -580,6 +581,8 @@ class Orchestrator:
                  drone=d.id, score=det.score)
         if d.agent:              # the sim's sensor already confirmed it, and the agent cannot fly a re-look
             self._confirm(s, "sim sensor")
+        elif not self.options["relook"]:
+            self._confirm(s, "re-look off")
         elif d.state == "SEARCH" and d.relook is None and not d.confirming:
             d.relook = {"sid": s.id, "from": vp}
 
@@ -833,7 +836,7 @@ class Orchestrator:
         cfg = self.cfg
         rl = d.relook
         s = self.survivors.get(rl["sid"])
-        if s is None or s.status != "candidate":
+        if s is None or s.status != "candidate" or not self.options["relook"]:
             d.relook = None
             return
         d.confirming = True

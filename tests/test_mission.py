@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from sar.config import MissionConfig
-from sar.mission.detect import SimDetector
+from sar.mission.detect import Detection, SimDetector
 from sar.mission.geo import AreaGrid, Frame, koester_prior
 from sar.mission.orchestrator import Orchestrator, Survivor
 from sar.mission.vehicle import KinematicVehicle, SimClock
@@ -301,6 +301,26 @@ def test_look_covers_footprint_once_per_pass():
         assert m.looks.max() == 1
         orch._look(d, cell, again=True)                   # a deliberate hold looks again
         assert m.looks.max() == 2
+        await orch.shutdown()
+    asyncio.run(main())
+
+
+def test_relook_option():
+    async def main():
+        orch = make(roles=("search", "rescue"))
+        await orch.start()
+        orch.start_mission(polygon=square(), mode="lawnmower", n_search=1, expected_survivors=1,
+                           options={"auto_dispatch": False, "relook": False})
+        d = orch.drones[0]
+        d.state = "SEARCH"
+        orch._on_detection(d, Detection(100.0, 100.0, 0.9, d.id), np.array([90.0, 90.0, 30.0]))
+        s = next(iter(orch.survivors.values()))
+        assert s.status == "confirmed" and d.relook is None          # off: confirmed on the first detection
+        await orch.command({"type": "set_options", "relook": True})
+        assert orch.state_msg()["options"]["relook"]
+        orch._on_detection(d, Detection(-100.0, -100.0, 0.9, d.id), np.array([-90.0, -90.0, 30.0]))
+        s2 = orch.survivors[d.relook["sid"]]
+        assert s2.status == "candidate"                               # on: held for the re-look
         await orch.shutdown()
     asyncio.run(main())
 

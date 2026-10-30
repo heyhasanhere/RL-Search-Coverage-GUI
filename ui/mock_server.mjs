@@ -68,7 +68,7 @@ const headingDeg = (a, b) =>
 
 // ---------- simulation ----------
 let t = 0, speed = 1;
-let options = { auto_dispatch: true, auto_replace: false, auto_stage: false, auto_switch: true };
+let options = { auto_dispatch: true, auto_replace: false, auto_stage: false, auto_switch: true, relook: true };
 let mission = blankMission();
 let drones = [], survivors = [], truth = [], grid = null, bounds = null, mask = null;
 let view = 0;   // drone the follow camera tracks

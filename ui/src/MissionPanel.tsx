@@ -77,7 +77,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
   const [lkpTimeH, setLkpTimeH] = useState(6);
   const [waterLevel, setWaterLevel] = useState(10.5);   // m above the normal river; floods the demo town
-  const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false, auto_switch: true });
+  const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false, auto_switch: true, relook: true });
   const [speed, setSpeed] = useState(1);
   const [droneSpeed, setDroneSpeed] = useState<number | null>(null);
   const shownSpeed = droneSpeed ?? state?.drone_speed ?? 10;
@@ -95,7 +95,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   }, [running, srvMode]);
   useEffect(() => {
     if (srvOpts) setOptions(srvOpts);
-  }, [srvOpts?.auto_dispatch, srvOpts?.auto_replace, srvOpts?.auto_stage, srvOpts?.auto_switch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [srvOpts?.auto_dispatch, srvOpts?.auto_replace, srvOpts?.auto_stage, srvOpts?.auto_switch, srvOpts?.relook]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const m = useMemo(() => (polygon && polygon.length >= 4 ? measure(polygon) : null), [polygon]);
   const maxSide = config.max_grid * config.cell_m;
@@ -243,6 +243,11 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
             <input type="checkbox" checked={options[k]} onChange={() => toggle(k)} /> {label}
           </label>
         ))}
+        {mode !== "rl_unity" && (
+          <label title="A search drone that detects a survivor flies to a point beside it and looks again before confirming; untick to confirm on the first detection">
+            <input type="checkbox" checked={options.relook} onChange={() => toggle("relook")} /> Re-check detections
+          </label>
+        )}
       </div>
       {config.backend === "kinematic" && (
         <label className="speed">
