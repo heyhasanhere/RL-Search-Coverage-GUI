@@ -1,0 +1,39 @@
+{
+  "steps": 5000000,
+  "contract": {
+    "format": 3,
+    "algorithm": "DQN",
+    "target_steps": 20000000,
+    "action_mapping": "joint_grid_v1_max243",
+    "learning_rate": 0.0001,
+    "buffer_size": 100000,
+    "batch_size": 128,
+    "learning_starts": 10000,
+    "gradient_steps": 1,
+    "target_update_interval": 10000,
+    "exploration_fraction": 0.1,
+    "exploration_final_eps": 0.05,
+    "exe_sha256": "78fd4776b65e70e3e0ac9e2daf7af26b8c94372247ceaf0dd4edf8b1bb4d4096",
+    "behavior": "SurvivorSearch",
+    "seed": 42,
+    "rollout_steps": 4,
+    "checkpoint_every": 200000,
+    "time_scale": 20.0,
+    "max_episode_steps": 0,
+    "no_graphics": false,
+    "network": [
+      256,
+      256
+    ],
+    "gamma": 0.9995,
+    "normalise_obs": true,
+    "normalise_reward": false
+  },
+  "saved_utc": "2026-10-26T07:40:37.608654+00:00",
+  "sha256": {
+    "model.zip": "cf123441bbab1ead0a7ea3c54005ed5936fb97259a8ecf1df090160122773013",
+    "vecnormalize.pkl": "103445dffc409f782d74f8a2d57b8f8b987a6eb398b4c9efd2e5206e4bc070fa",
+    "rng.pt": "cbc8483a2369d0587c42bc9a2d18beacefad5f058a05898cfbfd0029ac93c1a1",
+    "replay_buffer.pkl": "a71f95c35db35e060b7ac54af67d468fb67cd86ce637ce63d55934cf95641b63"
+  }
+}

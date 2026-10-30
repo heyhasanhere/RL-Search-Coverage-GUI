@@ -1,0 +1,27 @@
+{
+  "steps": 16000000,
+  "contract": {
+    "format": 2,
+    "exe_sha256": "78fd4776b65e70e3e0ac9e2daf7af26b8c94372247ceaf0dd4edf8b1bb4d4096",
+    "behavior": "SurvivorSearch",
+    "seed": 42,
+    "rollout_steps": 2000,
+    "checkpoint_every": 200000,
+    "time_scale": 10.0,
+    "max_episode_steps": 0,
+    "no_graphics": false,
+    "network": [
+      256,
+      256
+    ],
+    "gamma": 0.9995,
+    "normalise_obs": true,
+    "normalise_reward": false
+  },
+  "saved_utc": "2026-10-26T07:36:26.137446+00:00",
+  "sha256": {
+    "model.zip": "abf44d5ba55c85edddb0fb20f9c5745fdcbbfa555cf8687de88339951d482b2a",
+    "vecnormalize.pkl": "9afc6ca318b5cdad99b2e6a638696969caaf7b7e5c894e66d3cc0fa96be0f357",
+    "rng.pt": "abdc74fc3e334d2213349027c2ab57143a9f7038b1a4d673d412a1272ec08bcc"
+  }
+}

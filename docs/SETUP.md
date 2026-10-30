@@ -22,6 +22,7 @@ A plain `uv sync` on Linux installs CPU-only JAX, so name `--extra cuda` there.
 uv venv .venv-fly --python 3.12
 uv pip install --python .venv-fly/bin/python --no-deps mlagents-envs==1.1.0
 uv pip install --python .venv-fly/bin/python grpcio==1.62.2 protobuf==3.20.3 "numpy<2" setuptools cloudpickle pyyaml filelock pillow
+uv pip install --python .venv-fly/bin/python onnxruntime==1.19.2    # the rl_unity mode's trained agent
 ```
 
 `setuptools` is needed because `mlagents-envs` imports `distutils`.

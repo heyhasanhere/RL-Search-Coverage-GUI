@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -40,6 +41,8 @@ namespace FloodPatch
         static Camera overview;
         // the follow cameras (CargoAircraftCamera): 0 the main camera behind the search drone, 1 a copy behind the pickup drone
         static readonly Component[] followCams = new Component[2];
+        // each drone's own flight limits, read before the overrides: horizontal, vertical speed, tilt, wing area
+        internal static readonly Dictionary<MonoBehaviour, float[]> BuildLimits = new Dictionary<MonoBehaviour, float[]>();
 
         // Screen layout in pixels (x, y from the top, w, h); the bridge crops the same regions.
         const float SW = 3920f, SH = 720f;
@@ -76,6 +79,11 @@ namespace FloodPatch
 
         public static void Drone(MonoBehaviour controller)
         {
+            Component wing = controller.GetComponent("CargoAircraftController");
+            if (!BuildLimits.ContainsKey(controller))
+                BuildLimits[controller] = new[] {
+                    (float)Get(controller, "maximumHorizontalSpeed"), (float)Get(controller, "maximumVerticalSpeed"),
+                    (float)Get(controller, "maximumTiltDegrees"), wing == null ? 0f : (float)Get(wing, "wingArea") };
             Set(controller, "maximumHorizontalSpeed", "FLOODUAV_HSPEED");
             Set(controller, "maximumVerticalSpeed", "FLOODUAV_VSPEED");
             Set(controller, "maximumTiltDegrees", "FLOODUAV_TILT");

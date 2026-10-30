@@ -9,6 +9,9 @@ except to land. The vehicle adds alt_offset to every commanded height and subtra
 from the reported one, so the orchestrator's 23 m search height becomes min_alt in Unity
 and its settle and lag checks still close. Landing is real: the bridge descends straight
 down and keeps the drone on the ground until the next takeoff.
+
+The search drone can also be flown by the build's own trained agent (fly_agent, the
+orchestrator's rl_unity mode); the next setpoint, hold or landing takes it back.
 """
 
 import asyncio
@@ -36,6 +39,8 @@ class FloodVehicle(Vehicle):
         self.found: list = []           # Unity's recorded survivors (shared by both drones)
         self.episode = None
         self.on_reset = None          # callback(reason) when Unity ends its mission and restarts
+        self.agent_capable = False    # the bridge has the agent and this is its drone (build_flooduav)
+        self.agent_flying = False     # the bridge reports the agent flying this drone
         self._task = None
 
     async def start(self):
@@ -55,6 +60,7 @@ class FloodVehicle(Vehicle):
             if self.on_reset:
                 self.on_reset(st.get("last_end") or "Unity mission ended")
         self.episode, self.found = st["episode"], st["found"]
+        self.agent_flying = self.id == 0 and st.get("pilot") == "onnx"
         self.state = d = st["drones"][self.id]
         p = np.array(d["pos"], float)
         p[2] = 0.0 if self.landed else max(p[2] - self.alt_offset, 0.0)
@@ -113,6 +119,19 @@ class FloodVehicle(Vehicle):
         while math.hypot(*(self.tel.pos[:2] - self.home[:2])) > 3.0 and not self.landed:
             await self.clock.sleep(0.2)
         await self.land()
+
+    async def fly_agent(self, limits="training", agent=None):
+        """A trained agent (the bridge's default: None) flies this drone, from wherever it is (it takes off by itself)."""
+        msg = {"pilot": "onnx", "limits": limits} | ({"agent": agent} if agent else {})
+        r = await self.client.post(f"{self.bridge}/pilot", json=msg)
+        if r.status_code != 200:
+            raise RuntimeError(r.json().get("error", r.text))
+        self.landed, self.agent_flying = False, True
+
+    @property
+    def agl(self):
+        """Height above whatever is below, m; None: nothing within the ray's range."""
+        return self.state.get("agl")
 
     async def set_max_speed(self, v):
         await self.client.post(f"{self.bridge}/speed", json={"speed": float(v)})

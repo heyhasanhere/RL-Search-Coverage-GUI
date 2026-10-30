@@ -30,6 +30,8 @@ unity/SearchPickupDefault/  FloodUAV Linux build, downloaded by scripts/get_unit
 models/
   ft_best/seed1/         RL search policy (default `rl` mode)
   v2_m4/final/           v2 policy for the altitude and tree-search modes
+  unity_survivor_search/ FloodUAV's own trained agent (`rl_unity` mode)
+  RL_PPO-TRPO-DQN/       more `rl_unity` agents: PPO checkpoints, DQN and TRPO
 data/
   pd_table.json          detection probability table
   regions/demo_flood.npz flood town layers for the flood prior

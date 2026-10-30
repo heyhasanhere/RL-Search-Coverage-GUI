@@ -248,3 +248,49 @@ def test_bad_commands_raise():
             await orch.command({"type": "bogus"})
         await orch.shutdown()
     asyncio.run(main())
+
+
+class AgentVehicle(KinematicVehicle):
+    """A kinematic drone that the sim's trained agent can fly (rl_unity); it records the agent calls."""
+    agent_capable, agl = True, 30.0
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.agent_calls, self.agent_names, self.agent_flying = [], [], False
+
+    async def fly_agent(self, limits="training", agent=None):
+        self.agent_calls.append(limits)
+        self.agent_names.append(agent)
+        self.agent_flying = True
+
+
+def test_agent_mode_flies_and_hands_back():
+    async def main():
+        cfg = MissionConfig(pd=0.9)
+        clock = SimClock(SPEED)
+        vs = [AgentVehicle(0, (0.0, 0.0), clock, max_speed=cfg.transit_speed),
+              KinematicVehicle(1, (6.0, 0.0), clock, max_speed=cfg.transit_speed)]
+        orch = Orchestrator(cfg, vs, ["search", "rescue"], clock, None,
+                            lambda o, t: SimDetector(np.zeros((0, 2)), pd=0.9, fp=0.0, footprint_m=cfg.cell_m, seed=1))
+        assert "rl_unity" in orch.modes
+        await orch.start()
+        try:
+            orch.start_mission(polygon=square(), lkp=list(HOME), mode="rl_unity", n_search=1)
+            d = orch.drones[0]
+            assert await run_until(orch, lambda: d.agent, 30)
+            assert d.task_text == "searching (Unity agent)" and vs[0].agent_calls == ["training"]
+            await orch.command({"type": "set_agent_limits", "limits": "bridge"})
+            assert vs[0].agent_calls[-1] == "bridge" and orch.state_msg()["agent_limits"] == "bridge"
+            orch.agents, orch.agent = [{"id": "ppo", "label": "PPO 19M"}, {"id": "dqn", "label": "DQN 5M"}], "ppo"
+            await orch.command({"type": "set_agent", "agent": "dqn"})
+            assert vs[0].agent_names[-1] == "dqn" and orch.state_msg()["agent"] == "dqn"
+            with pytest.raises(ValueError):
+                await orch.command({"type": "set_agent", "agent": "nope"})
+            await orch.command({"type": "recall", "drone": 0})
+            assert await run_until(orch, lambda: not d.agent, 5)
+            assert d.state in ("RETURNING", "LANDED")      # the fake agent never took off
+        finally:
+            await orch.shutdown()
+        # backends without the agent do not offer the mode
+        assert "rl_unity" not in make().modes
+    asyncio.run(main())

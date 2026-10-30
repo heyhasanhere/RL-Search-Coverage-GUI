@@ -25,6 +25,8 @@ With it set, anyone can watch and only a browser logged in with the password (st
 | Patch | `patch/FloodPatch/Hook.cs`, `Layout.cs`, `patch/Injector/`, `patch/build.sh` | Hard-linked copy of the build at `unity/SearchPickupPatched` with hooks injected (Mono.Cecil) |
 | Fleet | `patch/FloodPatch/Fleet.cs` | Takes over the build's pickup drone (pilot and coordinator off) and flies it from a side channel |
 | Bridge | `bridge.py` (`.venv-fly`) | Steps Unity, flies both drones to setpoints, lands them, streams the screen regions as MJPEG and H.264 |
+| Trained agent | `models/unity_survivor_search/survivor_search_ppo_19m.onnx` | The build's own search agent (ML-Agents PPO, `train_config.yaml`); the bridge can fly D1 with it |
+| More agents | anywhere under `models/` | Drop-in: ML-Agents ONNX files and Stable-Baselines3 folders (DQN, TRPO) on the same observation, found automatically |
 | Backend | `sar/mission/flooduav.py`, `server.py --backend flooduav` | Two drones (D1 search drone, D2 pickup drone); survivors inside each drone's detection box become detections |
 
 The patch reads environment variables at mission start:
@@ -55,6 +57,19 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
 - The build's mission map goes to a second display, which Xvfb does not have.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.
+- Trained agent (`rl_unity` mode): `POST /pilot` with `{"pilot": "onnx"}` lets the build's agent fly D1 on Unity's 936-value observation.
+  `"agent": <id>` picks another agent; `GET /agents` lists them (`agents`, with a label such as "DQN 5M").
+  The bridge scans `--models` (default `models/`) recursively on each list, so a model copied in shows up without a restart.
+  `--agent` sets the default agent (its id is the path under `models/` without the suffix).
+  An agent is an ML-Agents `.onnx` file, or a Stable-Baselines3 folder with `model.zip` and `vecnormalize.pkl` (DQN also `action_mapping.json`).
+  `sim/flooduav/agents.py` runs the SB3 checkpoints in numpy, so the bridge needs neither torch nor SB3.
+  The next setpoint, hold or landing for D1 takes it back.
+  With `"limits": "training"` D1 flies with the build's own limits (10 m/s, 3 m/s climb, 20 degree tilt), the ones the agent was trained with.
+  With `"limits": "bridge"` it uses `--climb`, `--tilt` and the `/speed` cap.
+  The bridge's height floor and obstacle climb do not apply while the agent flies.
+  When the agent would leave the boundary within 3 s, the bridge steers D1 back inside and then gives control back to the agent. The boundary has a top too, about 83 m above the start.
+  When D1 moves less than 0.5 m in 4 s under the agent (for example resting on a pipe or roof), the bridge climbs it at full power for 2 s.
+  The agent needs `onnxruntime` in `.venv-fly` (`docs/SETUP.md`).
 - Replay of a FloodUAV mission draws the tracks on a plain map: the log does not keep the Unity top-down image or the search area outline.
 
 ## Survivor positions

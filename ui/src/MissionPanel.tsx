@@ -21,6 +21,7 @@ const OPTION_LABELS: [keyof Options, string][] = [
 
 const MODE_HINTS: Record<string, string> = {
   rl: "Trained MAPPO policy (main method)",
+  rl_unity: "A trained FloodUAV agent (PPO, TRPO or DQN) flies D1; other search drones use rl",
   rl_search: "Learned policy with tree search (main method)",
   mcts: "MCTS planner (strongest baseline)",
   planner: "Two-segment look-ahead planner",
@@ -58,7 +59,17 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const [scenario, setScenario] = useState<Scenario>((scenarios[0] as Scenario) ?? "wilderness");
   const [mode, setMode] = useState(config.modes[0] ?? "");
   const nDrones = Math.max(config.drones.length, 1);
-  const [nSearch, setNSearch] = useState(Math.min(2, nDrones));
+  // rl_unity: the agent flies D1 alone and the other drone stands by for rescue
+  const defaultSearch = (m: string) => (m === "rl_unity" ? 1 : Math.min(2, nDrones));
+  const [nSearch, setNSearch] = useState(defaultSearch(config.modes[0] ?? ""));
+  // Trained agents for rl_unity; models dropped into the models folder show up when the list is opened.
+  const [agents, setAgents] = useState(config.agents ?? []);
+  const refreshAgents = () => {
+    fetch("api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: Config | null) => c?.agents && setAgents(c.agents))
+      .catch(() => undefined);
+  };
   const [expected, setExpected] = useState(3);
   const [spawn, setSpawn] = useState(15);
   const [mix, setMix] = useState<SurvivorMix>(MIX_DEFAULT);
@@ -70,6 +81,8 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const [droneSpeed, setDroneSpeed] = useState<number | null>(null);
   const shownSpeed = droneSpeed ?? state?.drone_speed ?? 10;
   const sendDroneSpeed = () => send({ type: "set_drone_speed", speed: shownSpeed });
+  // rl_unity: the agent keeps the flight limits it was trained with unless the operator overrides them
+  const trainingLimits = mode === "rl_unity" && (state?.agent_limits ?? "training") === "training";
   const hasMission = !!state && state.mission.status !== "idle";
   const stopped = hasMission && (state.mission.status === "finished" || !!state.mission.stopping);
 
@@ -112,6 +125,11 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
 
   const changeMode = (v: string) => {
     setMode(v);
+    if (!running) setNSearch(defaultSearch(v));
+    if (v === "rl_unity") {
+      send({ type: "set_agent_limits", limits: "training" });
+      refreshAgents();
+    }
     if (running) send({ type: "set_mode", mode: v });
   };
 
@@ -238,10 +256,31 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
           />
         </label>
       )}
-      <label className="speed" title="Horizontal speed cap for all drones">
-        Drone speed {shownSpeed.toFixed(0)} m/s
+      {mode === "rl_unity" && (
+        <label title="The trained agent that flies D1 on Unity's observation; drop new models into the models folder. It can change during a mission">
+          Agent model
+          <select value={state?.agent ?? ""} onFocus={refreshAgents} onMouseDown={refreshAgents}
+            onChange={(e) => send({ type: "set_agent", agent: e.target.value })}>
+            {agents.length === 0 && <option value="">No agents in models/</option>}
+            {agents.map((a) => (
+              <option key={a.id} value={a.id} title={a.id}>{a.label}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {mode === "rl_unity" && (
+        <div className="checks">
+          <label title="The agent flies with the speed and tilt limits it was trained with (the build's 10 m/s, 3 m/s climb, 20 degree tilt); untick to use the Drone speed cap.">
+            <input type="checkbox" checked={trainingLimits}
+              onChange={() => send({ type: "set_agent_limits", limits: trainingLimits ? "bridge" : "training" })} />{" "}
+            Training flight limits
+          </label>
+        </div>
+      )}
+      <label className="speed" title={trainingLimits ? "Off while the agent uses its training flight limits" : "Horizontal speed cap for all drones"}>
+        Drone speed {trainingLimits ? "off" : `${shownSpeed.toFixed(0)} m/s`}
         <input
-          type="range" min={2} max={15} step={1} value={shownSpeed}
+          type="range" min={2} max={15} step={1} value={shownSpeed} disabled={trainingLimits}
           onChange={(e) => setDroneSpeed(Number(e.target.value))}
           onMouseUp={sendDroneSpeed} onTouchEnd={sendDroneSpeed} onKeyUp={sendDroneSpeed}
         />

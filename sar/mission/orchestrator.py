@@ -31,6 +31,10 @@ AIRBORNE = ("SEARCH", "RESCUE_TRANSIT", "ON_SURVIVOR", "RETURNING", "ABORT")
 TRANSIT_LOOKS = ("RESCUE_TRANSIT", "ON_SURVIVOR", "RETURNING", "STANDBY")   # non-search flights whose camera counts
 STOP_FRACTION = 0.02          # search ends when this fraction of the prior remains
 LEAD_SPEED = 3.0              # m/s the carrot may run ahead of the drone's speed along the leg
+# The sim's own trained agent flies the drone (vehicles with agent_capable, FloodUAV's search drone);
+# the other search drones use rl. The orchestrator only counts the agent's looks and finds.
+AGENT_MODE = "rl_unity"
+AGENT_LOOK_AGL = 10.0         # m above the ground below; lower, the agent's camera look does not count
 
 
 @dataclass
@@ -56,6 +60,7 @@ class Drone:
     standby_point: np.ndarray | None = None
     survivor: int | None = None
     entry: tuple | None = None
+    agent: bool = False                           # the sim's trained agent flies it (AGENT_MODE)
 
 
 @dataclass
@@ -124,6 +129,13 @@ class Orchestrator:
         self.on_restart = None                   # optional async callback: reset the sim world
         self.on_new_survivors = None             # optional async callback(count, mix): new survivor layout, returns (seed, count)
         self.drone_speed: float | None = None    # operator speed cap, m/s; None: vehicle default
+        # AGENT_MODE flight limits: "training" (the agent's own, speed cap off) or "bridge" (the operator's)
+        self.agent_limits = "training"
+        # AGENT_MODE trained agents ({"id", "label"}) and the one that flies; set by the backend
+        self.agents: list[dict] = []
+        self.agent: str | None = None
+        self.refresh_agents = None               # optional async callback: rescan the agents (drop-in models)
+        self.modes = tuple(MODES) + ((AGENT_MODE,) if any(getattr(v, "agent_capable", False) for v in vehicles) else ())
 
     # ---------------------------------------------------------------- basics
     async def start(self):
@@ -238,8 +250,8 @@ class Orchestrator:
                                expected_survivors=expected_survivors, options=options, mask=mask, prior=prior,
                                truth_en=truth_en, scenario=scenario, lkp_time_h=lkp_time_h, regions=regions,
                                water_level_m=water_level_m)
-        if mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}")
+        if mode not in self.modes:
+            raise ValueError(f"mode must be one of {self.modes}")
         self._check_v2_mode(mode)
         if mask is not None:
             g = mask.shape[0]
@@ -458,17 +470,18 @@ class Orchestrator:
 
     def _decide(self, d: Drone, from_cell, warm=False):
         m = self.mission
+        mode = "rl" if m.mode == AGENT_MODE else m.mode     # drones the agent cannot fly
         agents = self._agents(d, from_cell)
         seg_time = self.policy.cfg.ring * self.policy.cfg.t_straight
         t_frac = min(self.t_mission() / (self.policy.cfg.max_steps * seg_time), 1.0)
         slot = d.id if d.id < self.policy.n else 0
         args = (m.belief, m.grid.mask, m.looks, agents, m.home_cell, self.cfg.pd, m.belief0, t_frac)
-        if m.mode in MODES_V2:         # M4 search on env v2: action, cells and the level's altitude
-            a, cells, alt = get_policy_v2(m.grid.g).decide(m.mode, slot, *args)
+        if mode in MODES_V2:         # M4 search on env v2: action, cells and the level's altitude
+            a, cells, alt = get_policy_v2(m.grid.g).decide(mode, slot, *args)
         else:
-            (a, cells), alt = self.policy.decide(m.mode, slot, *args), self.cfg.search_alt
+            (a, cells), alt = self.policy.decide(mode, slot, *args), self.cfg.search_alt
         if not warm:
-            self.log("decide", drone=d.id, mode=m.mode, cell=list(from_cell), action=a)
+            self.log("decide", drone=d.id, mode=mode, cell=list(from_cell), action=a)
         return a, cells, alt
 
     def _check_v2_mode(self, mode):
@@ -535,7 +548,9 @@ class Orchestrator:
         self.event(f"{d.name} candidate #{s.id} (score {det.score:.2f})")
         self.log("candidate", sid=s.id, e=s.e, n=s.n, pos=self.lonlat(s.e, s.n),
                  drone=d.id, score=det.score)
-        if d.state == "SEARCH" and d.relook is None and not d.confirming:
+        if d.agent:              # the sim's sensor already confirmed it, and the agent cannot fly a re-look
+            self._confirm(s, "sim sensor")
+        elif d.state == "SEARCH" and d.relook is None and not d.confirming:
             d.relook = {"sid": s.id, "from": vp}
 
     def _confirm(self, s: Survivor, how):
@@ -704,6 +719,9 @@ class Orchestrator:
 
     # ------------------------------------------------------------- behaviors
     async def _search(self, d: Drone):
+        if self.mission.mode == AGENT_MODE and getattr(d.vehicle, "agent_capable", False):
+            await self._agent_search(d)
+            return
         cfg = self.cfg
         alt_t = cfg.transit_alt[d.id % len(cfg.transit_alt)]
         await self._ensure_airborne(d, alt_t)
@@ -738,6 +756,47 @@ class Orchestrator:
             d.path.extend(self._cell_point(c, alt) for c in cells)
             d.plan_cell = cells[-1]
             await self._follow(d, cfg.cruise, until_remaining=cfg.cell_m, check_relook=True)
+
+    async def _agent_search(self, d: Drone):
+        """The sim's trained agent flies the drone until another task takes it over; any setpoint ends its flight."""
+        await self.clock.sleep(0.5)        # a setpoint of the cancelled task still on its way would take the drone back
+        await d.vehicle.fly_agent(self.agent_limits, self.agent)
+        d.agent, d.heading, d.segment = True, -1, []
+        d.task_text = "searching (Unity agent)"
+        try:
+            while True:
+                m = self.mission
+                if m.belief.sum() < STOP_FRACTION * m.belief0:
+                    self.stop_mission("search complete")
+                    return
+                if not d.vehicle.agent_flying:       # Unity restarted its mission: the drone is back on its pad
+                    await d.vehicle.fly_agent(self.agent_limits, self.agent)
+                d.plan_cell = self.drone_cell(d)
+                await self.clock.sleep(1.0)
+        finally:
+            d.agent = False
+
+    async def set_agent_limits(self, limits: str):
+        if limits not in ("training", "bridge"):
+            raise ValueError("limits must be training or bridge")
+        self.agent_limits = limits
+        for d in self.drones:
+            if d.agent:
+                await d.vehicle.fly_agent(limits, self.agent)
+        self.event("agent flight limits: " + ("training (speed cap off)" if limits == "training" else "operator"))
+
+    async def set_agent(self, agent: str):
+        if self.refresh_agents is not None:
+            with contextlib.suppress(Exception):
+                await self.refresh_agents()
+        labels = {a["id"]: a["label"] for a in self.agents}
+        if agent not in labels:
+            raise ValueError(f"agent must be one of {list(labels)}")
+        self.agent = agent
+        for d in self.drones:
+            if d.agent:
+                await d.vehicle.fly_agent(self.agent_limits, agent)
+        self.event(f"Unity agent: {labels[agent]}")
 
     async def _relook(self, d: Drone):
         """Scripted re-look from a displaced viewpoint (plan 4.7)."""
@@ -938,7 +997,8 @@ class Orchestrator:
             # looks from the actual position; transit flights (rescue, return, staging) look too, as a search look
             searching = d.state == "SEARCH" and d.plan_cell is not None
             transit = d.state in TRANSIT_LOOKS and tel.in_air
-            if m and (searching or transit) and self._pos_agl(d)[2] > cfg.search_alt - 3:
+            high = (d.vehicle.agl or 0.0) > AGENT_LOOK_AGL if d.agent else self._pos_agl(d)[2] > cfg.search_alt - 3
+            if m and (searching or transit) and high:
                 cell = self.drone_cell(d)
                 if cell != d.last_cell:
                     d.last_cell = cell
@@ -991,14 +1051,25 @@ class Orchestrator:
             self.recharge(d)
         elif kind == "set_drone_speed":
             await self.set_drone_speed(msg["speed"])
+        elif kind == "set_agent_limits":
+            await self.set_agent_limits(msg["limits"])
+        elif kind == "set_agent":
+            await self.set_agent(msg["agent"])
         elif kind == "set_mode":
-            if msg["mode"] not in MODES:
-                raise ValueError(f"mode must be one of {MODES}")
+            if msg["mode"] not in self.modes:
+                raise ValueError(f"mode must be one of {self.modes}")
             self._check_v2_mode(msg["mode"])
             if msg["mode"] in MODES_V2:    # compiled at mission start; this is a no-op then
                 get_policy_v2(self.mission.grid.g).warmup(msg["mode"])
-            self.mission.mode = msg["mode"]
+            old, self.mission.mode = self.mission.mode, msg["mode"]
             self.event(f"search mode: {msg['mode']}")
+            if (old == AGENT_MODE) != (msg["mode"] == AGENT_MODE):
+                if msg["mode"] == AGENT_MODE:
+                    self.agent_limits = "training"
+                # the agent takes over a searching drone, or hands it back to the planner
+                for o in self.drones:
+                    if o.state == "SEARCH" and getattr(o.vehicle, "agent_capable", False):
+                        self._set_task(o, self._search(o), "SEARCH", "search mode changed")
         elif kind == "recall":
             was_search = d.state == "SEARCH"
             self._release_survivor(d)
@@ -1120,7 +1191,7 @@ class Orchestrator:
         if truth and self.truth_en is not None:
             tr = [self.lonlat(e, n) for e, n in self.truth_en]
         return {"type": "state", "t": round(self.t_mission(), 2), "speed": self.clock.speed,
-                "drone_speed": self.drone_speed,
+                "drone_speed": self.drone_speed, "agent_limits": self.agent_limits, "agent": self.agent,
                 "mission": mission, "drones": drones, "survivors": surv, "options": dict(self.options),
                 "truth": tr}
 

@@ -28,7 +28,6 @@ from sar.mission.detect import SimDetector
 from sar.mission.orchestrator import Orchestrator
 from sar.mission import replay
 from sar.mission.scenario import sample_survivors
-from sar.mission.search_policy import MODES
 from sar.mission.vehicle import BridgeClock, KinematicVehicle, SimClock
 from sar.mission.video import frames, frames_with_boxes, passthrough, stream_headers
 
@@ -87,6 +86,8 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     vehicles = [FloodVehicle(i, clock, args.bridge_url, alt_offset=info["min_alt"] - cfg.search_alt,
                              camera_fov_deg=info.get("camera_fov", 60.0), view_alt=info["min_alt"])
                 for i in range(len(info.get("homes", [0])))]
+    # drone 0 is the build's search drone: the bridge can fly it with the build's trained agent
+    vehicles[0].agent_capable = bool(info.get("onnx"))
     truth = np.array([[s["e"], s["n"]] for s in info["survivors"]], float)
 
     def detector_factory(orch, truth_en):
@@ -128,6 +129,17 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     orch = Orchestrator(cfg, vehicles, roles, clock, ckpt, detector_factory, log_path=log, seed=args.seed)
     orch.scenarios = ("flood",)
     orch.flood_info = info
+    orch.agents, orch.agent = info.get("agents", []), info.get("agent")
+
+    async def refresh_agents():
+        """Agents dropped into the bridge's models folder since the last look."""
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            new = (await client.get(f"{args.bridge_url}/agents")).json()
+        orch.agents = new["agents"]
+        if orch.agent not in {a["id"] for a in orch.agents}:
+            orch.agent = new["agent"]
+    orch.refresh_agents = refresh_agents
     orch.truth_en = truth          # Unity's survivors are known from the start, so truth shows before a mission
     orch.on_restart = restart
     orch.on_new_survivors = new_survivors
@@ -191,16 +203,21 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         return r
 
     @app.get("/api/config")
-    def config(request: Request):
+    async def config(request: Request):
+        refresh = getattr(orch, "refresh_agents", None)
+        if refresh is not None:
+            with contextlib.suppress(Exception):
+                await refresh()
         side = cfg.grid * cfg.cell_m
         return {
             "home": list(cfg.home), "cell_m": cfg.cell_m, "max_grid": cfg.grid,
-            "max_area_km2": round(side * side / 1e6, 2), "modes": list(MODES),
+            "max_area_km2": round(side * side / 1e6, 2), "modes": list(orch.modes),
             "drones": [{"id": d.id, "name": d.name, "role": d.role} for d in orch.drones],
             "backend": args.backend, "detector": args.detector,
             "bridge": bool(bridge),
             "survivor_layouts": orch.on_new_survivors is not None,
             "scenarios": list(getattr(orch, "scenarios", ("wilderness", "flood"))),
+            "agents": orch.agents,
             **flood_extras(orch),
             "login_required": bool(token), "operator": is_operator(request.cookies),
         }

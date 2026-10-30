@@ -9,6 +9,7 @@
 //   [4, 1 + k, fov, pan, tilt]              drone camera k: field of view, pan sideways, tilt from straight down (deg)
 //   [5, size]                               write a size x size top-down map to FLOODUAV_MAP
 //   [6, seed, count]                        survivor layout for the next mission start (Layout.cs; -1: the build's)
+//   [7, hspeed, vspeed, tilt, wing area]    search drone flight limits (m/s, m/s, deg, m2); below 0: the build's value
 // Unity to bridge, every decision step (5 physics steps):
 //   [pos x, y, z normalized in the boundary, velocity x, y, z in the boundary frame (m/s),
 //    heading sin, cos (from boundary forward, clockwise), nearest of 8 horizontal rays / 30 m,
@@ -52,7 +53,8 @@ namespace FloodPatch
         public static Fleet Instance;
 
         FleetChannel channel;
-        MonoBehaviour agent, controller;
+        MonoBehaviour agent, controller, searchController;
+        Component searchAircraft;
         MethodInfo setCommands;
         Rigidbody body;
         Transform pickupBase;
@@ -83,6 +85,8 @@ namespace FloodPatch
             pickupAgent.GetType().GetMethod("SetExternalNavigation").Invoke(pickupAgent, new object[] { true });
 
             Component aircraft = (Component)Hook.Get(mission, "aircraft");
+            f.searchAircraft = aircraft;
+            f.searchController = (MonoBehaviour)aircraft.GetComponent("DroneVelocityController");
 
             f.channel = new FleetChannel();
             SideChannelManager.RegisterSideChannel(f.channel);
@@ -123,6 +127,30 @@ namespace FloodPatch
             else if (kind == 6 && v.Count >= 3)
                 Layout.Set(Mathf.RoundToInt(v[1]), Mathf.RoundToInt(v[2]),
                            v.Count >= 8 ? new[] { v[3], v[4], v[5], v[6], v[7] } : null);
+            else if (kind == 7 && v.Count >= 5)
+                SearchLimits(v);
+        }
+
+        // DroneVelocityController reads its limits every step; only the tilt is also copied to the aircraft in OnEnable.
+        void SearchLimits(IList<float> v)
+        {
+            float[] build;
+            if (searchController == null || !Hook.BuildLimits.TryGetValue(searchController, out build))
+                return;
+            float[] lim = new float[4];
+            for (int i = 0; i < 4; i++)
+                lim[i] = v[i + 1] < 0f ? build[i] : v[i + 1];
+            Type t = searchController.GetType();
+            t.GetField("maximumHorizontalSpeed", F).SetValue(searchController, lim[0]);
+            t.GetField("maximumVerticalSpeed", F).SetValue(searchController, lim[1]);
+            t.GetField("maximumTiltDegrees", F).SetValue(searchController, lim[2]);
+            if (searchAircraft != null)
+            {
+                searchAircraft.GetType().GetField("hoverAssistMaxTilt", F).SetValue(searchAircraft, lim[2]);
+                if (lim[3] > 0f)
+                    searchAircraft.GetType().GetField("wingArea", F).SetValue(searchAircraft, lim[3]);
+            }
+            Debug.Log("[FloodPatch] search drone limits " + string.Join(" ", Array.ConvertAll(lim, x => x.ToString("0.##"))));
         }
 
         void FixedUpdate()

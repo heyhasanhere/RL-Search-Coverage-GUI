@@ -11,6 +11,12 @@ setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
   POST /setpoint           {"drone": k, "pos": [e, n, u], "vel": [ve, vn, vu]}; "hold": true holds where it is,
                            "land": true descends and rests on the ground below
   POST /speed              {"speed": m/s} horizontal speed cap for both drones
+  GET  /agents             {"onnx": any agent, "agent": id, "agents": [{"id", "label"}]}: the trained agents now
+                           in --models (drop-in, rescanned on each call)
+  POST /pilot              {"pilot": "onnx" | "setpoint", "limits": "training" | "bridge", "agent": id} who flies
+                           the search drone: a trained agent (--models, default --agent) on Unity's observation, or the setpoints;
+                           a setpoint for drone 0 hands it back to the setpoints. "training": the build's flight
+                           limits while the agent flies; "bridge": --max-speed (or the /speed cap), --climb, --tilt
   POST /reset              restart Unity's mission: drones back on their pads, survivors unfound
   POST /survivors          {"seed": n, "count": k, "shares": {...}} new survivor layout of k survivors, then a
                            reset; no seed: a random one, -1: the build's fixed survivors; no count: the build's 15.
@@ -51,6 +57,8 @@ from mlagents_envs.environment import UnityEnvironment
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
 from mlagents_envs.side_channel.side_channel import IncomingMessage, OutgoingMessage, SideChannel
 
+import agents
+
 # observation indices (SurvivorSearchAgent.CollectObservations)
 VEL = slice(0, 3)          # local velocity / (10, 3, 10)
 AGL_HIT, AGL = 9, 10       # down ray hit flag, distance / 100 m
@@ -59,6 +67,9 @@ SIN, COS = 14, 15          # heading from boundary forward (north), clockwise
 RAYS = slice(16, 24)       # 8 horizontal obstacle rays / 30 m, from forward clockwise
 UP_RAY, DOWN_RAY = 24, 25
 SIM_DT = 0.1               # one decision = 5 physics steps of 0.02 s
+FENCE_S = 3.0              # the agent is steered back inside when it would leave the boundary within this time
+STUCK_S = 4.0              # the agent's drone is lifted when it moves under 0.5 m in this time (resting on a pipe or roof)
+ROOT = Path(__file__).resolve().parents[2]
 
 # screen layout from Hook.SplitViews: follow view of drone 0, the two drone cameras stacked,
 # square overview, follow view of drone 1
@@ -190,6 +201,12 @@ class Unity:
         self.pending_layout = None
         self.layout_done = threading.Event()
         self.layout_sent = False
+        self.pilot, self.limits = "setpoint", "training"   # search drone: who flies it, which flight limits
+        # trained search agents dropped into --models, the chosen one and its loaded model
+        self.catalog = agents.Catalog(args.models)
+        self.agent, self.flying = args.agent, None
+        self._still, self._climb_until = (0.0, np.zeros(3)), -1.0   # stuck check while the agent flies
+        self._limits_sent = None
         os.environ.update({
             "FLOODUAV_HSPEED": str(args.max_speed), "FLOODUAV_VSPEED": str(args.climb),
             "FLOODUAV_TILT": str(args.tilt), "FLOODUAV_TIME_LIMIT": "1000000",
@@ -253,6 +270,7 @@ class Unity:
                     self.episode += 1
                     self.found = {}
                     self._land_all()
+                    self._limits_sent = None
             if not ended:
                 return
             self.env.step()          # ML-Agents starts the next episode; the drones are back on their pads
@@ -260,6 +278,7 @@ class Unity:
     def _land_all(self):
         for d in self.drones:
             d.mode, d.target, d.hold_at = "land", None, None
+        self.pilot = "setpoint"
 
     def _tail_log(self):
         for line in self._log.readlines():
@@ -275,7 +294,8 @@ class Unity:
         with self.lock:
             return {
                 "t": round(self.steps * SIM_DT, 2), "episode": self.episode, "last_end": self.reason,
-                "speed_cap": self.speed_cap, "drones": [d.snapshot() for d in self.drones],
+                "speed_cap": self.speed_cap, "pilot": self.pilot, "limits": self.limits, "agent": self.agent,
+                "drones": [d.snapshot() for d in self.drones],
                 "found": [{"id": k, "e": v[0], "n": v[1]} for k, v in self.found.items()],
             }
 
@@ -283,12 +303,45 @@ class Unity:
     def set_target(self, k, pos=None, vel=None, mode="fly"):
         with self.lock:
             d = self.drones[k]
+            if k == 0:
+                self.pilot = "setpoint"
             d.mode, d.hold_at = mode, d.pos.copy()
             d.target = None if pos is None else (np.asarray(pos, float), np.asarray(vel if vel is not None else [0, 0, 0], float))
 
     def set_speed(self, v):
         with self.lock:
             self.speed_cap = float(np.clip(v, 1.0, self.args.max_speed))
+
+    def agents(self) -> dict:
+        """The trained agents now in --models (agents.Catalog); the default one first."""
+        found = self.catalog.scan(len(self.obs)) if self.obs is not None else {}
+        if self.agent not in found and found:
+            self.agent = self.args.agent if self.args.agent in found else next(iter(found))
+        return dict(sorted(found.items(), key=lambda kv: kv[0] != self.agent))
+
+    def set_pilot(self, pilot, limits=None, agent=None):
+        if pilot not in ("onnx", "setpoint") or limits not in (None, "training", "bridge"):
+            raise ValueError("pilot: onnx or setpoint; limits: training or bridge")
+        found = self.agents()
+        agent = agent or self.agent
+        if agent not in found:
+            raise ValueError(f"no agent {agent!r} in {self.args.models}; agents: {', '.join(found) or 'none'}")
+        with self.lock:
+            self.agent, self.flying = agent, found[agent]["pilot"]
+            if pilot == "onnx":
+                d = self.drones[0]
+                d.mode, d.target, d.hold_at = "fly", None, None
+            self.pilot = pilot
+            if limits is not None:
+                self.limits = limits
+
+    def _search_limits(self):
+        """Fleet message 7 for the search drone: the build's limits (-1) under the agent, else the bridge's."""
+        a = self.args
+        if self.pilot == "onnx" and self.limits == "training":
+            return (-1.0, -1.0, -1.0, -1.0)
+        h = self.speed_cap if self.pilot == "onnx" else a.max_speed
+        return (h, a.climb, a.tilt, a.wing_area)
 
     def reset(self):
         """Restart Unity's mission: drones back on their pads, survivors unfound."""
@@ -347,19 +400,62 @@ class Unity:
         d.cmd = [fwd, side, up, 0.0]
         return d.cmd
 
+    def _fence(self, d: Drone):
+        """The setpoint command back inside the boundary when the agent would leave it within FENCE_S, else None.
+        Leaving it ends Unity's mission and freezes both drones."""
+        sc = self.scene
+        ahead = d.pos + d.vel * FENCE_S            # the boundary top (about 83 m) counts too
+        if np.all(ahead >= sc.lo) and np.all(ahead <= sc.hi):
+            return None
+        inset = (sc.hi[:2] - sc.lo[:2]) * 0.1
+        tgt = d.pos.copy()
+        tgt[:2] = np.clip(tgt[:2], sc.lo[:2] + inset, sc.hi[:2] - inset)
+        tgt[2] = np.clip(tgt[2], self.args.min_alt, sc.hi[2] - 15.0)
+        target, d.target = d.target, (tgt, np.zeros(3))
+        try:
+            return self._command(d)
+        finally:
+            d.target = target
+
+    def _unstick(self, d: Drone):
+        """A full climb for STUCK_S / 2 when the agent's drone has moved under 0.5 m in STUCK_S, else None.
+        The agent does not climb off what it rests on, and contact no longer ends the mission (FLOODUAV_SOFT)."""
+        t = self.steps * SIM_DT
+        if t < self._climb_until:
+            return [0.0, 0.0, 1.0, 0.0]
+        t0, p0 = self._still
+        if t < t0 or np.linalg.norm(d.pos - p0) > 0.5:
+            self._still = (t, d.pos.copy())
+        elif t - t0 > STUCK_S:
+            self._climb_until, self._still = t + STUCK_S / 2, (t + STUCK_S / 2, d.pos.copy())
+            print(f"agent drone stuck at {np.round(d.pos, 1).tolist()}: climbing", flush=True)
+            return [0.0, 0.0, 1.0, 0.0]
+        return None
+
     def run(self):
         wall0, sim0 = time.monotonic(), 0
         while True:
             with self.lock:
                 acts = [self._command(d) for d in self.drones]
+                if self.pilot == "onnx":
+                    d0 = self.drones[0]
+                    over = self._fence(d0)
+                    if over is None:
+                        over = self._unstick(d0)
+                    acts[0] = d0.cmd = over if over is not None else self.flying.act(self.obs)
+                limits = self._search_limits()
                 reset, self.pending_reset = self.pending_reset, False
                 layout, self.pending_layout = self.pending_layout, None
+            if limits != self._limits_sent:
+                self.fleet.send([7, *limits])
+                self._limits_sent = limits
             if reset:
                 self.env.reset()
                 self._reload_info()
                 with self.lock:
                     self.found = {}
                     self._land_all()
+                    self._limits_sent = None
                 if self.layout_sent:
                     self.layout_sent = False
                     self.layout_done.set()
@@ -520,6 +616,11 @@ def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
     sc = unity.scene
     maps: dict[str, bytes] = {}       # the map render, made once: the town does not change
 
+    def agent_list():
+        found = unity.agents()
+        return {"onnx": bool(found), "agent": unity.agent,
+                "agents": [{"id": k, "label": a["label"]} for k, a in found.items()]}
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -538,6 +639,8 @@ def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
                 return self._json({"sim_time": unity.steps * SIM_DT})
             if path == "/state":
                 return self._json(unity.snapshot())
+            if path == "/agents":
+                return self._json(agent_list())
             if path == "/info":
                 return self._json({"area_en": sc.area(), "overview_en": sc.overview_box(), "home": unity.home.tolist(),
                                    "homes": [d.home.round(2).tolist() for d in unity.drones],
@@ -548,7 +651,8 @@ def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
                                    "survivor_seed": sc.info.get("survivor_seed", -1),
                                    "survivor_shares": sc.info.get("survivor_shares"),
                                    "limits": {"lo": sc.lo.tolist(), "hi": sc.hi.tolist()},
-                                   "min_alt": args.min_alt, "max_speed": args.max_speed})
+                                   "min_alt": args.min_alt, "max_speed": args.max_speed,
+                                   **agent_list()})
             if path == "/map.jpg":
                 if "map" not in maps:
                     jpg = unity.map_jpg(args.map_px)
@@ -624,6 +728,12 @@ def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
             if self.path == "/speed":
                 unity.set_speed(msg["speed"])
                 return self._json({"ok": True, "speed": unity.speed_cap})
+            if self.path == "/pilot":
+                try:
+                    unity.set_pilot(msg.get("pilot", "setpoint"), msg.get("limits"), msg.get("agent"))
+                except (ValueError, ImportError, OSError) as exc:
+                    return self._json({"error": str(exc)}, 400)
+                return self._json({"ok": True, "pilot": unity.pilot, "limits": unity.limits, "agent": unity.agent})
             if self.path == "/reset":
                 unity.reset()
                 return self._json({"ok": True})
@@ -678,6 +788,10 @@ def main():
     ap.add_argument("--survivor-count", type=int, default=-1,
                     help="number of survivors (1-100); -1 keeps the build's 15; more than 15 needs --survivor-seed")
     ap.add_argument("--map-px", type=int, default=4096, help="map render size, pixels per side")
+    ap.add_argument("--models", default=str(ROOT / "models"),
+                    help="drop-in folder of trained search agents (sim/flooduav/agents.py), flown with POST /pilot")
+    ap.add_argument("--agent", default="unity_survivor_search/survivor_search_ppo_19m",
+                    help="the default agent: its path under --models, without .onnx")
     args = ap.parse_args()
 
     unity = Unity(args)

@@ -13,6 +13,8 @@ export interface Config {
   max_grid: number;
   max_area_km2: number;
   modes: string[];
+  /** rl_unity: the trained agents the sim bridge can fly D1 with. */
+  agents?: { id: string; label: string }[];
   drones: DroneInfo[];
   backend: "kinematic" | "flooduav";
   detector: "sim";
@@ -105,6 +107,10 @@ export interface StateMsg {
   truth: LonLat[] | null;
   /** Operator drone speed cap in m/s; null: the vehicle default. */
   drone_speed?: number | null;
+  /** rl_unity flight limits: "training" (the agent's own, speed cap off) or "bridge" (the operator's cap). */
+  agent_limits?: "training" | "bridge";
+  /** rl_unity: id of the trained agent that flies. */
+  agent?: string | null;
 }
 
 export interface BeliefMsg {
@@ -315,6 +321,10 @@ export type ClientMsg =
   /** Horizontal speed cap for all drones, m/s. */
   | { type: "set_drone_speed"; speed: number }
   | { type: "set_mode"; mode: string }
+  /** rl_unity: the agent flies with its training flight limits, or with the operator's speed cap. */
+  | { type: "set_agent_limits"; limits: "training" | "bridge" }
+  /** rl_unity: which trained agent flies (Config.agents id). */
+  | { type: "set_agent"; agent: string }
   | { type: "recall"; drone: number }
   | { type: "standby"; drone: number; point?: LonLat }
   | { type: "launch"; drone: number; task: "search" | "rescue"; survivor?: number }
