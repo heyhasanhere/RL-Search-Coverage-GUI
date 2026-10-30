@@ -51,6 +51,15 @@ h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing
 .area-info { margin-bottom: 8px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
 label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.mix { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.mix summary { cursor: pointer; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--text); }
+.mix-sum { color: var(--muted); margin-left: 6px; }
+.mix[open] summary { margin-bottom: 4px; }
+.mix-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.mix-head .warn { color: var(--warn, #d08a00); }
+.mix-head button { margin-left: auto; padding: 1px 8px; font-size: 11px; }
+.mix-fields { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.mix-fields input { width: 100%; min-width: 0; }
 .checks { display: flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
 .checks label, .toggles label { flex-direction: row; align-items: center; gap: 4px; color: var(--text); }
 .speed { margin-bottom: 8px; }

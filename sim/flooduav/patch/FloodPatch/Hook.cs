@@ -296,6 +296,7 @@ namespace FloodPatch
             sb.Append(",\"camera_fov\":").Append((search == null ? 60f : search.fieldOfView).ToString("R", CultureInfo.InvariantCulture));
             sb.Append(",\"cells\":").Append(Layout.CellsJson());
             sb.Append(",\"survivor_seed\":").Append(Layout.Seed.ToString(CultureInfo.InvariantCulture));
+            sb.Append(",\"survivor_shares\":").Append(Layout.SharesJson());
             sb.Append(",\"survivors\":[");
             bool first = true;
             foreach (MonoBehaviour m in root.GetComponentsInChildren<MonoBehaviour>(true))

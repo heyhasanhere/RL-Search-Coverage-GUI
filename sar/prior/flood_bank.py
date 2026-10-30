@@ -65,6 +65,8 @@ def cell_prior(comps, area, shares=SHARES):
     area = np.asarray(area, bool)
     live = {k: shares[k] for k in KINDS if (comps[k] * area).sum() > 0}
     tot = sum(live.values()) + shares["uniform"]
+    if tot <= 0:                    # a mix of only kinds the scene lacks: anywhere, as Layout.cs places them
+        return _norm(area.astype(np.float64))
     out = shares["uniform"] / tot * _norm(area.astype(np.float64))
     for k, s in live.items():
         out = out + s / tot * _norm(comps[k] * area)
@@ -103,6 +105,8 @@ def cells_prior(cells, grid, shares=SHARES):
     area = np.asarray(grid.mask, bool) & (count > 0)
     blend = cell_prior(comps, area, shares)
     live = sum(shares[k] for k in KINDS if (comps[k] * area).sum() > 0) + shares["uniform"]
+    if live <= 0:                   # see cell_prior
+        shares, live = {**{k: 0.0 for k in KINDS}, "uniform": 1.0}, 1.0
     out = {k: shares[k] / live * _norm(comps[k] * area) for k in KINDS}
     out["uniform"] = shares["uniform"] / live * _norm(area.astype(np.float64))
     out["blend"] = blend
@@ -112,14 +116,21 @@ def cells_prior(cells, grid, shares=SHARES):
 def make_cells_builder(get_info):
     """Orchestrator prior builder from the FloodUAV scene cell types; `get_info()` gives the bridge /info.
 
-    Without cell types (an old patch) it falls back to the Koester ring prior.
+    The shares are the survivor terrain mix the scene's survivors were placed with (`survivor_shares`),
+    else SHARES. Without cell types (an old patch) it falls back to the Koester ring prior.
     """
     def builder(grid, lkp_en, lkp_time_h, scenario, water_level_m):
-        cells = (get_info() or {}).get("cells")
+        info = get_info() or {}
+        cells = info.get("cells")
         if not cells:
             from sar.mission.geo import koester_prior
             return {"koester": koester_prior(grid, lkp_en)}
-        return cells_prior(cells, grid)
+        mix = info.get("survivor_shares")
+        if isinstance(mix, dict) and set(mix) == set(SHARES) and sum(mix.values()) > 0:
+            shares = {k: float(mix[k]) / sum(mix.values()) for k in SHARES}
+        else:
+            shares = SHARES
+        return cells_prior(cells, grid, shares)
     return builder
 
 

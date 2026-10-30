@@ -117,7 +117,7 @@ class Orchestrator:
         self.metrics = {"looks": 0, "relooks": 0, "false_dispatch": 0}
         self.last_start: dict | None = None      # start_mission arguments, for restart
         self.on_restart = None                   # optional async callback: reset the sim world
-        self.on_new_survivors = None             # optional async callback(count): new survivor layout, returns (seed, count)
+        self.on_new_survivors = None             # optional async callback(count, mix): new survivor layout, returns (seed, count)
         self.drone_speed: float | None = None    # operator speed cap, m/s; None: vehicle default
 
     # ---------------------------------------------------------------- basics
@@ -342,15 +342,27 @@ class Orchestrator:
         self._next_sid = 1
         self.event("mission reset")
 
-    async def new_survivors(self, count=None):
-        """Reset, then `count` survivors at new random positions (scene backends with a survivor layout)."""
+    async def new_survivors(self, count=None, mix=None):
+        """Reset, then `count` survivors at new random positions (scene backends with a survivor layout).
+
+        `mix` is the survivor terrain mix, weights by SHARES key (normalized); None keeps the default.
+        """
+        from sar.prior.flood_bank import SHARES
         if self.on_new_survivors is None:
             raise ValueError("this backend has no survivor layouts")
         if count is not None and not 1 <= int(count) <= 100:
             raise ValueError("survivor count must be 1-100")
+        if mix is not None:
+            if not isinstance(mix, dict) or set(mix) - set(SHARES):
+                raise ValueError(f"survivor mix keys: {', '.join(SHARES)}")
+            mix = {k: float(mix.get(k, 0.0)) for k in SHARES}
+            if any(not math.isfinite(w) or w < 0 for w in mix.values()) or sum(mix.values()) <= 0:
+                raise ValueError("survivor mix weights must be 0 or more, and not all 0")
         await self.reset_mission()
-        seed, n = await self.on_new_survivors(count)
-        self.event(f"new survivor positions: {n} survivors (seed {seed})")
+        seed, n = await self.on_new_survivors(count, mix)
+        mixed = "" if mix is None else ", mix " + " ".join(
+            f"{k} {100 * w / sum(mix.values()):.0f}%" for k, w in mix.items())
+        self.event(f"new survivor positions: {n} survivors (seed {seed}{mixed})")
 
     async def _reset_world(self):
         tasks = [d.task for d in self.drones if d.task and not d.task.done()]
@@ -930,7 +942,7 @@ class Orchestrator:
         elif kind == "reset_mission":
             await self.reset_mission()
         elif kind == "new_survivors":
-            await self.new_survivors(msg.get("count"))
+            await self.new_survivors(msg.get("count"), msg.get("mix"))
         elif kind == "recharge":
             self.recharge(d)
         elif kind == "set_drone_speed":

@@ -131,7 +131,8 @@ namespace FloodPatch
             else if (kind == 5 && v.Count >= 2)
                 Hook.RenderMap(Mathf.RoundToInt(v[1]));
             else if (kind == 6 && v.Count >= 3)
-                Layout.Set(Mathf.RoundToInt(v[1]), Mathf.RoundToInt(v[2]));
+                Layout.Set(Mathf.RoundToInt(v[1]), Mathf.RoundToInt(v[2]),
+                           v.Count >= 8 ? new[] { v[3], v[4], v[5], v[6], v[7] } : null);
         }
 
         void FixedUpdate()

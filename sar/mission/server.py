@@ -93,12 +93,16 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
         orch.truth_en = truth
         return FloodDetector(vehicles, truth)
 
-    async def new_survivors(count=None):
-        """New random survivor positions in Unity (`count` survivors, None: the build's 15); returns seed and count."""
+    async def new_survivors(count=None, mix=None):
+        """New random survivor positions in Unity (`count` survivors, None: the build's 15; `mix`: terrain mix
+        weights, None: the default); returns seed and count."""
         nonlocal truth
         import httpx
+        body = {} if count is None else {"count": int(count)}
+        if mix is not None:
+            body["shares"] = mix
         async with httpx.AsyncClient(timeout=90.0) as client:
-            r = await client.post(f"{args.bridge_url}/survivors", json={} if count is None else {"count": int(count)})
+            r = await client.post(f"{args.bridge_url}/survivors", json=body)
             r.raise_for_status()
             new = (await client.get(f"{args.bridge_url}/info")).json()
         for v in vehicles:

@@ -1,11 +1,12 @@
 // Survivor positions and scene cell types (sim/flooduav/README.md).
-// Seed < 0 keeps the build's fixed survivors. Any other seed scatters them by the flood
-// survivor shares of sar/prior/flood_bank.py (nobody inside a building):
 //   roof         50%  tops of flooded buildings above the water
+// Seed < 0 keeps the build's fixed survivors. Any other seed scatters them by the survivor terrain
+// mix, by default the flood survivor shares of sar/prior/flood_bank.py (nobody inside a building):
 //   high ground  25%  dry ground near the flood edge, weight exp(-d^2 / 2 sigma^2), dry islands doubled
 //   bridge       10%  bridge decks above the water
 //   water        10%  in open flood water, upper body above the surface
 //   random        5%  any outdoor surface or water in the area
+// A layout can carry its own mix (Set); the info file reports it as survivor_shares.
 // The same seed gives the same positions; the layout is made once per seed and put back at
 // every mission start, so a reset keeps it.
 // Count: how many survivors are in the town. Fewer than the build's are hidden; more are copies
@@ -30,9 +31,11 @@ namespace FloodPatch
 {
     public static class Layout
     {
-        // sar/prior/flood_bank.py SHARES, in the order of Kinds
+        // sar/prior/flood_bank.py SHARES, in the order of Kinds and ShareKeys
         static readonly string[] Kinds = { "roof", "high_ground", "bridge", "water", "random" };
-        static readonly float[] Shares = { 0.50f, 0.25f, 0.10f, 0.10f, 0.05f };
+        static readonly string[] ShareKeys = { "roofs", "high_ground", "bridges", "water", "uniform" };
+        static readonly float[] DefaultShares = { 0.50f, 0.25f, 0.10f, 0.10f, 0.05f };
+        static float[] Shares = (float[])DefaultShares.Clone();
         static readonly char[] KindCells = { 'r', '.', 'b', 'w', '*' };
         const float SampleStep = 10f;      // cell type sample spacing, m
         const float WaterDepthShown = 0.6f; // a person in the water stands this far below its surface
@@ -71,12 +74,30 @@ namespace FloodPatch
 
         public static int Seed { get { return seed; } }
 
-        // A new layout of `n` survivors (-1: the build's number); it takes effect at the next mission start.
-        public static void Set(int value, int n)
+        // A new layout of `n` survivors (-1: the build's number) with terrain mix `shares` (null or
+        // all zero: the default); it takes effect at the next mission start.
+        public static void Set(int value, int n, float[] shares)
         {
             seed = value;
             count = n;
             poses = null;
+            float sum = 0f;
+            if (shares != null && shares.Length == DefaultShares.Length)
+                foreach (float x in shares)
+                    sum += Mathf.Max(x, 0f);
+            Shares = new float[DefaultShares.Length];
+            for (int k = 0; k < Shares.Length; k++)
+                Shares[k] = sum > 0f ? Mathf.Max(shares[k], 0f) / sum : DefaultShares[k];
+        }
+
+        // JSON object of the terrain mix, keyed like sar/prior/flood_bank.py SHARES.
+        public static string SharesJson()
+        {
+            var sb = new System.Text.StringBuilder("{");
+            for (int k = 0; k < Shares.Length; k++)
+                sb.Append(k == 0 ? "" : ",").Append('"').Append(ShareKeys[k]).Append("\":")
+                  .Append(Shares[k].ToString("R", CultureInfo.InvariantCulture));
+            return sb.Append('}').ToString();
         }
 
         public static string Kind(MonoBehaviour survivor)
@@ -352,6 +373,8 @@ namespace FloodPatch
                 int kind = DrawKind(rng);
                 for (int tries = 0; cand[kind].Count == 0 && tries < 10; tries++)
                     kind = DrawKind(rng);          // a scene without bridges gives their share to the others
+                if (cand[kind].Count == 0)
+                    kind = Kinds.Length - 1;       // a mix of only missing kinds: anywhere
                 bool found = false;
                 for (int t = 0; t < Tries && !found && cand[kind].Count > 0; t++)
                 {

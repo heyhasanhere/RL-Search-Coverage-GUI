@@ -168,8 +168,8 @@ Later missions send it again.
 | `continue_mission` | - | Resumes a stopped or finished mission: belief, coverage and survivors are kept, the search drones take off again. Batteries are not recharged |
 | `restart_mission` | - | Resets the world and starts the last mission again |
 | `reset_mission` | - | Resets the world to before the start and does not start: drones on their pads, batteries full, survivors cleared, survivor numbers start again at 1 |
-| `new_survivors` | `count` (1-100, optional, default the build's 15) | FloodUAV only (`survivor_layouts` in the config): `reset_mission`, then `count` survivors at new random positions in Unity. Later resets keep them. An event names the count and the layout seed |
 | `set_mode` | `mode` | Changes the search mode mid-mission |
+| `new_survivors` | `count` (1-100, optional, default the build's 15), `mix` (optional) | FloodUAV only (`survivor_layouts` in the config): `reset_mission`, then `count` survivors at new random positions in Unity. Later resets keep them. `mix` is the survivor terrain mix: weights 0 or more for `roofs`, `high_ground`, `bridges`, `water`, `uniform` (missing keys are 0, not all 0), normalized; without it the default 50 / 25 / 10 / 10 / 5. The flood prior of later missions uses the same mix. An event names the count, the layout seed and the mix |
 | `recall` | `drone` | Drone returns home (RETURNING) |
 | `standby` | `drone`, `point` ([lon, lat], optional, default home) | Drone parks at the point (STANDBY) |
 | `launch` | `drone`, `task` (`search` or `rescue`), `survivor` (for rescue, optional) | Launches a standby or idle drone |

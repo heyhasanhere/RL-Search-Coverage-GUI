@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import area from "@turf/area";
 import bbox from "@turf/bbox";
 import distance from "@turf/distance";
-import type { ClientMsg, Config, LonLat, Options, Region, Scenario, StateMsg } from "./types";
+import type { ClientMsg, Config, LonLat, Options, Region, Scenario, StateMsg, SurvivorMix } from "./types";
 
 interface Props {
   config: Config;
@@ -42,6 +42,16 @@ function measure(ring: LonLat[]) {
   return { km2: area(poly) / 1e6, side: Math.max(width, height) };
 }
 
+// Survivor terrain mix in percent, the default of sar/prior/flood_bank.py SHARES.
+const MIX_DEFAULT: SurvivorMix = { roofs: 50, high_ground: 25, bridges: 10, water: 10, uniform: 5 };
+const MIX_LABELS: [keyof SurvivorMix, string, string][] = [
+  ["roofs", "Roof", "Flat roofs of flooded buildings, above the water"],
+  ["high_ground", "High ground", "Dry ground near the flood edge"],
+  ["bridges", "Bridge", "Bridge decks above the water"],
+  ["water", "Water", "In open flood water"],
+  ["uniform", "Random", "Anywhere outdoors in the area"],
+];
+
 export default function MissionPanel({ config, state, polygon, lkp, regions, send }: Props) {
   const running = state?.mission.status === "running";
   const scenarios = config.scenarios ?? ["wilderness", "flood"];
@@ -51,6 +61,8 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const [nSearch, setNSearch] = useState(Math.min(2, nDrones));
   const [expected, setExpected] = useState(3);
   const [spawn, setSpawn] = useState(15);
+  const [mix, setMix] = useState<SurvivorMix>(MIX_DEFAULT);
+  const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
   const [lkpTimeH, setLkpTimeH] = useState(6);
   const [waterLevel, setWaterLevel] = useState(10.5);   // m above the normal river; floods the demo town
   const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false });
@@ -184,6 +196,28 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
           </label>
         )}
       </div>
+      {config.survivor_layouts && (
+        <details className="mix" title="How likely each new survivor lands on each terrain kind; New survivors uses it and so does the search prior. Normalized to 100%">
+          <summary>
+            Survivor terrain mix <span className="mix-sum">{MIX_LABELS.map(([k]) => mix[k]).join(" / ")}</span>
+          </summary>
+          <div className="mix-head">
+            <span className={mixTotal === 100 ? "" : "warn"}>total {mixTotal}%</span>
+            <button onClick={() => setMix(MIX_DEFAULT)} title="Back to 50 / 25 / 10 / 10 / 5">Default</button>
+          </div>
+          <div className="mix-fields">
+            {MIX_LABELS.map(([k, label, tip]) => (
+              <label key={k} title={tip}>
+                {label}
+                <input
+                  type="number" min={0} max={100} step={1} value={mix[k]}
+                  onChange={(e) => setMix((m) => ({ ...m, [k]: Math.min(100, Math.max(0, Math.round(Number(e.target.value)) || 0)) }))}
+                />
+              </label>
+            ))}
+          </div>
+        </details>
+      )}
       <div className="checks">
         {OPTION_LABELS.map(([k, label]) => (
           <label key={k}>
@@ -232,8 +266,8 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
           Reset
         </button>
         {config.survivor_layouts && (
-          <button onClick={() => send({ type: "new_survivors", count: spawn })}
-            title="Reset, then place 'Survivors in map' survivors at new random positions (roofs and dry ground near the flood); Reset keeps them">
+          <button disabled={mixTotal <= 0} onClick={() => send({ type: "new_survivors", count: spawn, mix })}
+            title="Reset, then place 'Survivors in map' survivors at new random positions by the survivor terrain mix; Reset keeps them">
             New survivors
           </button>
         )}

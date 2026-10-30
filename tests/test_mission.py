@@ -103,8 +103,8 @@ def test_new_survivors_resets_then_lays_out():
         await orch.start()
         calls = []
 
-        async def layout(count):
-            calls.append((orch.mission, count))         # reset_mission ran first
+        async def layout(count, mix):
+            calls.append((orch.mission, count, mix))    # reset_mission ran first
             return 42, count
         with pytest.raises(ValueError):           # the kinematic backend has no layouts
             await orch.command({"type": "new_survivors"})
@@ -112,9 +112,14 @@ def test_new_survivors_resets_then_lays_out():
         orch.start_mission(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
         assert await run_until(orch, lambda: orch.survivors, 300)
         await orch.command({"type": "new_survivors", "count": 30})
-        assert calls == [(None, 30)] and orch.mission is None and not orch.survivors
+        assert calls == [(None, 30, None)] and orch.mission is None and not orch.survivors
         with pytest.raises(ValueError):
             await orch.command({"type": "new_survivors", "count": 0})
+        await orch.command({"type": "new_survivors", "mix": {"roofs": 80, "water": 20}})
+        assert calls[-1][2] == {"roofs": 80.0, "high_ground": 0.0, "bridges": 0.0, "water": 20.0, "uniform": 0.0}
+        for bad in ({"roofs": 0}, {"roofs": -1, "water": 5}, {"lake": 1}, [50, 50]):
+            with pytest.raises(ValueError):
+                await orch.command({"type": "new_survivors", "mix": bad})
         assert all(d.state == "IDLE" and not d.vehicle.tel.in_air for d in orch.drones)
         await orch.shutdown()
     asyncio.run(main())

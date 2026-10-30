@@ -189,3 +189,22 @@ def test_demo_flood_file():
     assert np.allclose(p["blend"], lay["prior"], atol=1e-6)
 
 
+
+
+def test_cells_builder_follows_survivor_mix():
+    from types import SimpleNamespace
+    from sar.prior.flood_bank import make_cells_builder
+    # 2 x 2 grid of 10 m cells, one sample each: roof, dry, water, dry
+    grid = SimpleNamespace(e0=0.0, n0=20.0, cell=10.0, g=2, mask=np.ones((2, 2), bool))
+    cells = {"origin_en": [5.0, 15.0], "di_en": [10.0, 0.0], "dj_en": [0.0, -10.0], "nx": 2, "nz": 2, "types": "r.w."}
+
+    def blend(shares):
+        info = {"cells": cells, "survivor_shares": shares}
+        return make_cells_builder(lambda: info)(grid, None, 0.0, "flood", 0.0)["blend"]
+    roofs = {"roofs": 1.0, "high_ground": 0.0, "bridges": 0.0, "water": 0.0, "uniform": 0.0}
+    assert np.allclose(blend(roofs), [[1, 0], [0, 0]])
+    assert np.allclose(blend({**roofs, "roofs": 0.0, "water": 3.0}), [[0, 0], [1, 0]])
+    # only kinds the scene lacks: anywhere, as the patch places them
+    assert np.allclose(blend({**roofs, "roofs": 0.0, "bridges": 1.0}), 0.25)
+    assert np.isclose(blend(None).sum(), 1.0)       # an old patch without survivor_shares: the default mix
+

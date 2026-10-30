@@ -46,6 +46,8 @@ Without it they show a placeholder.
 - Drone `Standby`: click the map to choose the point, or `At home`.
 - 3D follow and drone camera (FloodUAV): scroll to zoom, drag to turn, double-click to reset.
 - `Restart` resets the world and starts the same mission again. `Reset` resets the world and waits for Start.
+- Survivor terrain mix (FloodUAV): percent of new survivors on roofs, high ground, bridges, water and anywhere
+  (default 50 / 25 / 10 / 10 / 5). `New survivors` places them by it, and the search prior uses the same mix.
 - `Settings` (top bar): show or hide the true survivor positions on the map.
 
 ## Screenshots

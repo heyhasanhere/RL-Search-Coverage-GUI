@@ -280,6 +280,9 @@ export interface Region {
   weight: number;
 }
 
+/** Survivor terrain mix: how likely a new survivor lands on each terrain kind (sar/prior/flood_bank.py SHARES). */
+export type SurvivorMix = Record<"roofs" | "high_ground" | "bridges" | "water" | "uniform", number>;
+
 export type ClientMsg =
   | {
       type: "start_mission";
@@ -304,8 +307,9 @@ export type ClientMsg =
   | { type: "restart_mission" }
   /** Back to before the first start: no mission, drones on their pads, batteries full. Nothing starts. */
   | { type: "reset_mission" }
-  /** FloodUAV: Reset, then `count` survivors (1-100, default the build's 15) at new random positions; later Resets keep them. */
-  | { type: "new_survivors"; count?: number }
+  /** FloodUAV: Reset, then `count` survivors (1-100, default the build's 15) at new random positions; later Resets keep them.
+   * `mix`: survivor terrain mix, weights by kind (normalized); the flood prior uses the same mix. */
+  | { type: "new_survivors"; count?: number; mix?: SurvivorMix }
   /** Full battery for a landed drone. */
   | { type: "recharge"; drone: number }
   /** Horizontal speed cap for all drones, m/s. */

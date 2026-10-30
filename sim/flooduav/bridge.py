@@ -12,8 +12,9 @@ setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
                            "land": true descends and rests on the ground below
   POST /speed              {"speed": m/s} horizontal speed cap for both drones
   POST /reset              restart Unity's mission: drones back on their pads, survivors unfound
-  POST /survivors          {"seed": n, "count": k} new survivor layout of k survivors, then a reset; no seed: a
-                           random one, -1: the build's fixed survivors; no count: the build's 15.
+  POST /survivors          {"seed": n, "count": k, "shares": {...}} new survivor layout of k survivors, then a
+                           reset; no seed: a random one, -1: the build's fixed survivors; no count: the build's 15.
+                           shares: terrain mix weights by SHARE_KEYS, normalized (none: the default mix).
                            Returns once the new positions are in /info.
   POST /view               {"drone": k} follow camera target
   POST /camera             {"view": "follow", "distance", "yaw", "pitch"} or {"view": "drone", "drone": k, "fov", "pan", "tilt"}
@@ -60,6 +61,20 @@ REGIONS = {"follow": (0, 0, 1280, 720), "cam0": (1280, 0, 640, 360), "cam1": (12
            "overview": (1920, 0, 720, 720)}
 RECORDED = re.compile(r"Recorded (\S+) at")
 FINISHED = re.compile(r"Mission (Failed|TimedOut|Succeeded): (.*)")
+# survivor terrain mix keys, as in sar/prior/flood_bank.py SHARES and the patch's Layout.ShareKeys
+SHARE_KEYS = ("roofs", "high_ground", "bridges", "water", "uniform")
+
+
+def parse_shares(shares):
+    """Terrain mix weights {key: w} as a normalized list in SHARE_KEYS order; None stays None."""
+    if shares is None:
+        return None
+    if not isinstance(shares, dict) or set(shares) - set(SHARE_KEYS):
+        raise ValueError(f"shares: an object with keys from {', '.join(SHARE_KEYS)}")
+    w = [float(shares.get(k, 0.0)) for k in SHARE_KEYS]
+    if any(not math.isfinite(x) or x < 0 for x in w) or sum(w) <= 0:
+        raise ValueError("shares: weights must be 0 or more, and not all 0")
+    return [x / sum(w) for x in w]
 
 
 class Scene:
@@ -271,11 +286,12 @@ class Unity:
         with self.lock:
             self.pending_reset = True
 
-    def new_layout(self, seed, count=-1, timeout=60.0) -> bool:
-        """Survivor layout `seed` with `count` survivors from the next mission start on; waits until /info has it."""
+    def new_layout(self, seed, count=-1, shares=None, timeout=60.0) -> bool:
+        """Survivor layout `seed` with `count` survivors and terrain mix `shares` (list in SHARE_KEYS order,
+        None: the default) from the next mission start on; waits until /info has it."""
         with self.lock:
             self.layout_done.clear()
-            self.pending_layout = (int(seed), int(count))
+            self.pending_layout = (int(seed), int(count), *(shares or []))
         return self.layout_done.wait(timeout)
 
     def _reload_info(self):
@@ -450,6 +466,7 @@ def make_handler(unity: Unity, grab: Grabber, args):
                                    "kinds": {s["id"]: s.get("kind", "fixed") for s in sc.info["survivors"]},
                                    "cells": sc.cells(),
                                    "survivor_seed": sc.info.get("survivor_seed", -1),
+                                   "survivor_shares": sc.info.get("survivor_shares"),
                                    "limits": {"lo": sc.lo.tolist(), "hi": sc.hi.tolist()},
                                    "min_alt": args.min_alt, "max_speed": args.max_speed})
             if path == "/map.jpg":
@@ -514,7 +531,11 @@ def make_handler(unity: Unity, grab: Grabber, args):
             if self.path == "/survivors":
                 seed = msg.get("seed")
                 seed = int(np.random.default_rng().integers(0, 1 << 24)) if seed is None else int(seed)
-                if not unity.new_layout(seed, int(msg.get("count", -1))):
+                try:
+                    shares = parse_shares(msg.get("shares"))
+                except ValueError as exc:
+                    return self._json({"error": str(exc)}, 400)
+                if not unity.new_layout(seed, int(msg.get("count", -1)), shares):
                     return self._json({"error": "Unity did not restart with the new layout"}, 504)
                 return self._json({"ok": True, "seed": seed, "count": len(sc.survivors())})
             if self.path == "/view":
