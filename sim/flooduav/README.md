@@ -54,6 +54,7 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
   The bridge steers from where the drone will be `--lead` seconds ahead (default 1.5), so it brakes early and does not swing around a stop or a turn.
   The drone trails a moving setpoint by about its speed x `--lead`. `GET /info` reports `lead`, and the mission server allows that trailing before it pauses the path.
 - Top speed: the drone reaches about 14 m/s at most, even with a higher `--max-speed`. With a 15 m/s cap it flies about 10-11 m/s and stays within about 5 m of the path; above that it drifts up to about 9 m off the path.
+  So the bridge's `--max-speed` and the UI's drone speed cap both default to 15 m/s (3 m/s in `rl_unity`).
 - Commands to the bridge are sent up to 3 times before the drone's task fails.
 - Lost link: a flying drone with no position update for 3 s is reported lost and aborted. After a pause of the mission server, the check waits one more 3 s first.
 - Two drones under our control, 15 survivors by default (1-100, see Survivor positions). Both drones use the same detection box.
