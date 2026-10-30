@@ -94,7 +94,8 @@ The agent cannot fly a re-look, so its finds are confirmed at once.
     "level": "low | high | transit | null",
     "alt_agl": 25.0,
     "sortie": 1,
-    "swap_remaining": null
+    "swap_remaining": null,
+    "footprint_m": [23.1, 41.1]
   }],
   "survivors": [{
     "id": 4, "pos": [lon, lat],
@@ -109,7 +110,7 @@ The agent cannot fly a re-look, so its finds are confirmed at once.
 
 `truth` is the simulated ground truth; it is sent only when the server runs with `--show-truth`.
 
-The four extra drone fields are optional and older clients ignore them.
+The extra drone fields are optional and older clients ignore them.
 
 | Field | Meaning |
 |---|---|
@@ -117,6 +118,7 @@ The four extra drone fields are optional and older clients ignore them.
 | `alt_agl` | Height above the ground or canopy under the drone, in meters. The search levels are 23 m and 69 m. |
 | `sortie` | Battery sortie number, 1 on the first flight. It goes up after each battery swap. |
 | `swap_remaining` | Seconds left of a battery swap, or null when no swap is running. The UI shows a countdown and the drone state stays `LANDED`. |
+| `footprint_m` | Half sizes of the camera's ground footprint in meters, `[along-track, cross-track]`. The map draws this box, and a look covers every cell whose center is inside it (section 4.3). Without a camera model it is half a cell each way, one cell. |
 
 ### 3.2 `belief` (about 1 Hz while a mission runs)
 
@@ -130,7 +132,9 @@ The four extra drone fields are optional and older clients ignore them.
 ```
 
 `corners` are top-left, top-right, bottom-right, bottom-left, the order a MapLibre image source expects.
-The belief PNG is a heatmap (transparent outside the area); the coverage PNG marks looked-at cells. Every airborne drone at search height or above looks at the cell below it, also on rescue, return and staging flights, and a look there counts as a search look.
+The belief PNG is a heatmap (transparent outside the area); the coverage PNG marks looked-at cells.
+Every airborne drone at search height or above looks at the cells in its camera footprint, also on rescue, return and staging flights, and a look there counts as a search look.
+Section 4.3 (Coverage) gives the rule.
 
 ### 3.3 `prior` (once per mission)
 
