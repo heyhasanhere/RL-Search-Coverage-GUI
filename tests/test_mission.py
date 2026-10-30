@@ -325,6 +325,23 @@ def test_relook_option():
     asyncio.run(main())
 
 
+def test_close_survivors_merge():
+    async def main():
+        for merge_m, found in ((8.0, 1), (0.5, 2)):   # default merge, FloodUAV's exact-position merge
+            orch = make(roles=("search", "rescue"), merge_m=merge_m)
+            await orch.start()
+            orch.start_mission(polygon=square(), mode="lawnmower", n_search=1, expected_survivors=2,
+                               options={"auto_dispatch": False, "relook": False})
+            d = orch.drones[0]
+            d.state = "SEARCH"
+            vp = np.array([90.0, 90.0, 30.0])
+            for e, n in ((100.0, 100.0), (101.0, 101.5), (100.0, 100.0)):   # two survivors 1.8 m apart, one seen twice
+                orch._on_detection(d, Detection(e, n, 0.9, d.id), vp)
+            assert len(orch.survivors) == found
+            await orch.shutdown()
+    asyncio.run(main())
+
+
 def test_bad_commands_raise():
     async def main():
         orch = make()

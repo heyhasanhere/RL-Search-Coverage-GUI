@@ -81,7 +81,8 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
         raise SystemExit("--backend flooduav needs --bridge <FloodUAV bridge url>")
     info = fetch_info(args.bridge_url)
     # the Unity drones answer setpoints slower than the kinematic ones: plan gentler braking and turns
-    cfg = replace(cfg, accel=1.5, turn_speed=3.0)
+    # FloodDetector reports exact positions: merge only repeat sightings, not survivors a few meters apart
+    cfg = replace(cfg, accel=1.5, turn_speed=3.0, merge_m=0.5)
     clock = BridgeClock(args.bridge_url)
     vehicles = [FloodVehicle(i, clock, args.bridge_url, alt_offset=info["min_alt"] - cfg.search_alt,
                              camera_fov_deg=info.get("camera_fov", 60.0), view_alt=info["min_alt"],

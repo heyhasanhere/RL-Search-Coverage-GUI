@@ -48,6 +48,7 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - Landing is real: the drone descends straight down and keeps pushing down on the ground. Over open water (no ground within 150 m) it hovers instead.
 - Detection: a drone detects every survivor inside its detection box, the box drawn around it on the map. The box is the downward camera's ground view from the bridge's `--min-alt` (46 x 82 m at 40 m) and keeps that size at any height. The rule uses the true survivor positions with no line of sight; Unity's own visibility sensor is not used.
   The search coverage and belief use the same box: a look counts every cell whose center is inside it, once per pass (`docs/PROTOCOL.md` section 4.3).
+  Because the positions are exact, detections merge into one survivor only within 0.5 m (`merge_m`; the kinematic sim keeps 8 m for its 2 m position noise). Survivors a few meters apart stay separate.
 - `rl_unity` mode: search drones never switch to rescue on their own (`auto_switch` is skipped). The operator dispatches by hand.
 - If a drone leaves the boundary (sides or top, about 83 m above the start), Unity ends its mission and freezes both drones. Stop and Recall cannot move them then; Reset puts them back on their pads. Collisions do not end the mission (`FLOODUAV_SOFT`).
 - Setpoint flight: Unity's drone follows a speed command about 0.4 s late and then takes about 1.7 s to reach it, and it brakes at about 4 m/s2 at most (25 degree tilt).
