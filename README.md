@@ -8,7 +8,7 @@ The server flies the drones through one of two backends:
 | Backend | Sim | Where |
 |---|---|---|
 | `kinematic` | Simple point-mass drones, simulated detector | Any machine |
-| `flooduav` | FloodUAV Unity town, two drones | Linux with an NVIDIA GPU |
+| `flooduav` | FloodUAV Unity town, two drones | Linux with an NVIDIA GPU, or a Mac with Apple silicon |
 
 FloodUAV is the only 3D sim.
 The UI can also replay a mission log or a packed recording from `runs/replays/`.
@@ -27,6 +27,7 @@ sar/                     Python package
 sim/
   flooduav/              Unity bridge, build patch (C#), run.sh
 unity/SearchPickupDefault/  FloodUAV Linux build, downloaded by scripts/get_unity.sh (not in git)
+unity/FloodUAV.app/         FloodUAV macOS build (not in git, docs/SETUP.md section 7)
 models/
   ft_flood/seed1/        RL search policy fine-tuned on flood towns (default `rl` mode)
   ft_best/seed1/         previous RL search policy (`--ckpt models/ft_best/seed1`)
@@ -38,7 +39,7 @@ data/
   regions/demo_flood.npz flood town layers for the flood prior
 scripts/                 kinematic demo, mission driver, Unity build download, replay recorder and packer
 tests/                   Python tests
-docs/                    setup, protocol, status
+docs/                    setup, protocol
 runs/                    logs, mission logs and packed replays (output)
 ```
 
@@ -61,21 +62,22 @@ At startup the server compiles the search policies for every grid size in the ba
 This takes about 30 s on a laptop CPU, and about 10 s on later starts because compiled code is cached in `runs/jax_cache`.
 A mission started before that waits for it. `--no-warm` skips the startup compile, and `--jax-cache ""` turns the cache off.
 
-FloodUAV on the Linux GPU machine (UI on port 8001):
+FloodUAV on the Linux GPU machine or a Mac (UI on port 8001):
 
 ```bash
-scripts/get_unity.sh       # once: downloads the Unity build (512 MB) into unity/
+scripts/get_unity.sh       # Linux, once: downloads the Unity build (512 MB) into unity/
 sim/flooduav/run.sh up
 sim/flooduav/run.sh down
 ```
 
 Open `http://<host>:8001`.
+On a Mac, skip `get_unity.sh`: put the macOS build at `unity/FloodUAV.app` (`docs/SETUP.md` section 7) and open http://localhost:8001.
 
 ## Docs
 
 | File | Content |
 |---|---|
-| `docs/SETUP.md` | Environments, system installs, running on the GPU machine |
+| `docs/SETUP.md` | Environments, system installs, running on the GPU machine or a Mac |
 | `docs/PROTOCOL.md` | Server API and WebSocket messages |
 | `sim/flooduav/README.md` | FloodUAV backend details |
 | `ui/README.md` | Web app notes |

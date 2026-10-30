@@ -1,19 +1,21 @@
 # FloodUAV in the Operator UI
 
-The FloodUAV Unity town (`unity/SearchPickupDefault`, Linux build) runs as a mission backend.
+The FloodUAV Unity town runs as a mission backend: the Linux build (`unity/SearchPickupDefault`) or the macOS build (`unity/FloodUAV.app`).
 The operator UI (`ui/`) shows its views and drones.
 The Unity build is used only for its scene and visuals. Its rewards and agent are not used.
 
-## Run (on the Linux GPU machine)
+## Run (on the Linux GPU machine or a Mac)
 
 ```bash
-sim/flooduav/run.sh up      # Xvfb :97, bridge :8101, UI and mission server :8001
+sim/flooduav/run.sh up      # bridge :8101, UI and mission server :8001 (Linux: on Xvfb :97)
 sim/flooduav/run.sh down
 ```
 
-Open `http://<host>:8001`. The search area is preset to the Unity boundary, and the map shows only a top-down render of the town (no real-world tiles).
+Mac setup: `docs/SETUP.md` section 7.
+
+Open `http://<host>:8001` (`http://localhost:8001` on a Mac). The search area is preset to the Unity boundary, and the map shows only a top-down render of the town (no real-world tiles).
 Press Start (scenario `flood`). Logs are in `runs/flooduav_ui/`, and the mission log is `runs/mission/flooduav_ui.jsonl`.
-Run `down` in its own SSH call: its `pkill` patterns can match a command line that contains them.
+Over SSH, run `down` in its own SSH call: its `pkill` patterns can match a command line that contains them.
 
 Operator password: put `SAR_CONTROL_PASSWORD=...` in `~/.config/sar-search/control.env` (or the file named by `SAR_ENV_FILE`) before `up`.
 With it set, anyone can watch and only a browser logged in with the password (status bar, Log in) can send commands.
@@ -22,9 +24,10 @@ With it set, anyone can watch and only a browser logged in with the password (st
 
 | Part | File | Role |
 |---|---|---|
-| Patch | `patch/FloodPatch/Hook.cs`, `Layout.cs`, `patch/Injector/`, `patch/build.sh` | Hard-linked copy of the build at `unity/SearchPickupPatched` with hooks injected (Mono.Cecil) |
+| Patch | `patch/FloodPatch/Hook.cs`, `Layout.cs`, `patch/Injector/`, `patch/build.sh` | Copy of the build with hooks injected (Mono.Cecil): `unity/SearchPickupPatched` (Linux, hard links) or `unity/FloodUAVPatched.app` (macOS, clones, signed ad hoc) |
+| Capture | `patch/FloodPatch/Capture.cs` | macOS: the split views render into a 3920x720 texture instead of the screen, and its frames go to a file the bridge reads (`--capture file`) |
 | Fleet | `patch/FloodPatch/Fleet.cs` | Takes over the build's pickup drone (pilot and coordinator off) and flies it from a side channel |
-| Bridge | `bridge.py` (`.venv-fly`) | Steps Unity, flies both drones to setpoints, lands them, streams the screen regions as MJPEG and H.264 |
+| Bridge | `bridge.py` (`.venv-fly`) | Steps Unity, flies both drones to setpoints, lands them, streams the screen regions (or the captured frames) as MJPEG and H.264 |
 | Trained agent | `models/unity_survivor_search/survivor_search_ppo_19m.onnx` | The build's own search agent (ML-Agents PPO, `train_config.yaml`); the bridge can fly D1 with it |
 | More agents | anywhere under `models/` | Drop-in: ML-Agents ONNX files and Stable-Baselines3 folders (DQN, TRPO) on the same observation, found automatically |
 | Backend | `sar/mission/flooduav.py`, `server.py --backend flooduav` | Two drones (D1 search drone, D2 pickup drone); survivors inside each drone's detection box become detections |
@@ -38,8 +41,14 @@ The patch reads environment variables at mission start:
 - It places the survivors (`FLOODUAV_SURVIVOR_SEED`, see Survivor positions below).
 - It writes the boundary, start point and survivor positions to a JSON file.
 
-Unity renders with Vulkan on the NVIDIA GPU (`-force-vulkan`); OpenGL under Xvfb falls back to llvmpipe at about 3 fps.
+Linux: Unity renders with Vulkan on the NVIDIA GPU (`-force-vulkan`); OpenGL under Xvfb falls back to llvmpipe at about 3 fps.
 The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so GPU 0 stays free for Unity.
+
+macOS: Unity renders with Metal in a small window (784x200) that shows a preview; the views go to the frame file (`--frames`, default `/tmp/flooduav_frames.raw`) at `--fps`.
+The window must stay open: Unity draws only with a window, so it cannot run headless (`-nographics` turns off the video and the map).
+Do not quit it with Cmd+Q or the Dock: the player can hang while quitting. If Unity stops, the bridge exits too; restart with `down`, then `up`. On macOS `down` force-kills a player that does not quit.
+The frame file is a 32-byte header (frame number, width, height, slot) and two RGBA slots, bottom row first (`Capture.cs`).
+The mission server runs JAX on the CPU.
 
 ## Behavior and limits
 
@@ -61,9 +70,9 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 - Two drones under our control, 15 survivors by default (1-100, see Survivor positions). Both drones use the same detection box.
 - Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. It keeps the survivor positions. Speed cap: `POST /speed`.
 - Camera zoom and angle: `POST /camera` with `{"view": "follow", "drone", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
-- Video: `GET /stream/<region>` is MJPEG (`?small=1`: 640 px wide, 6 frames a second). `GET /h264/<region>` is H.264 from the GPU encoder (NVENC, libx264 if NVENC fails), 2 Mbit/s with a key frame every second. Each H.264 encoder runs only while someone watches it.
+- Video: `GET /stream/<region>` is MJPEG (`?small=1`: 640 px wide, 6 frames a second). `GET /h264/<region>` is H.264 from the GPU encoder (NVENC on Linux, VideoToolbox on macOS, libx264 if that fails), 2 Mbit/s with a key frame every second. Each H.264 encoder runs only while someone watches it.
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
-- The build's mission map goes to a second display, which Xvfb does not have.
+- The build's mission map (`MissionMapDisplay`) goes to a second display, which Xvfb does not have. With offscreen capture (macOS) the patch turns it off, or it would open as a full-screen window in its own desktop space.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.
 - Trained agent (`rl_unity` mode): `POST /pilot` with `{"pilot": "onnx"}` lets the build's agent fly D1 on Unity's 936-value observation.
   `"agent": <id>` picks another agent; `GET /agents` lists them (`agents`, with a label such as "DQN 5M").
@@ -85,8 +94,8 @@ The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so 
 The build has 15 fixed survivors. The patch (`patch/FloodPatch/Layout.cs`) can move them to random positions drawn from a seed.
 
 - The UI button New survivors (or `POST /survivors` on the bridge) resets the mission and makes a new random layout. Reset and Restart keep it.
-- Survivors in map (next to Expected survivors) sets how many survivors New survivors places, 1-100. Fewer than 15 hides some of the build's survivors; more adds copies of its first survivor (`Survivor_016` and on).
-- Survivor terrain mix (below Survivors in map) sets how likely each survivor lands on each kind in the table below. It is five percent fields, by default 50 / 25 / 10 / 10 / 5, normalized to 100%. New survivors uses it, and the search prior uses the same mix.
+- Survivors in map (`Settings` > Simulation) sets how many survivors New survivors places, 1-100. Fewer than 15 hides some of the build's survivors; more adds copies of its first survivor (`Survivor_016` and on).
+- Survivor terrain mix (`Settings` > Mission settings) sets how likely each survivor lands on each kind in the table below. It is five percent fields, by default 50 / 25 / 10 / 10 / 5, normalized to 100%. New survivors uses it, and the search prior uses the same mix.
 - The same seed gives the same layout. Start with one: `sim/flooduav/run.sh up --survivor-seed 7 --survivor-count 30`. The defaults `-1` keep the build's 15 survivors. With the build's layout the count can only go down.
 - Survivors stand at least 10 m apart and 25 m from the drone pads. Nobody is inside a building.
 

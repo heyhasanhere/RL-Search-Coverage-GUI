@@ -2,7 +2,7 @@
 
 All commands run from the project root.
 Any machine runs the kinematic backend, the UI build and the tests.
-The FloodUAV backend needs Linux with an NVIDIA GPU (tested on Ubuntu with two RTX 3060).
+The FloodUAV backend runs on Linux with an NVIDIA GPU (two GPUs: section 6) or on a Mac with Apple silicon (section 7).
 
 ## 1. Python Environments
 
@@ -78,3 +78,32 @@ Unity renders on GPU 0.
 The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation.
 At startup it compiles the search policies for every grid size there, and `runs/flooduav_ui/server.log` shows `search policies ready` when done.
 Ports: UI 8001, bridge 8101.
+
+## 7. macOS
+
+FloodUAV also runs on a Mac with Apple silicon, from a macOS build of the same Unity project.
+Unity renders with Metal, the patch renders the views offscreen and the bridge encodes them with VideoToolbox, so no X server or screen capture is needed.
+The mission server runs JAX on the CPU.
+The macOS build is not in the GitHub Release; build it from the Unity project.
+
+1. Install Homebrew, `uv` and Node.js. Create both venvs (section 1, without `--extra cuda`) and build the UI (section 2).
+2. Install the tools:
+
+   ```bash
+   brew install ffmpeg
+   curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0 --install-dir ~/.dotnet
+   ```
+
+3. Build the player in Unity (File > Build Profiles > macOS, Apple silicon, Mono scripting backend) and save it as `unity/FloodUAV.app`.
+   The patch needs Mono: IL2CPP builds have no `Managed/Assembly-CSharp.dll`.
+4. Start and stop as on Linux:
+
+   ```bash
+   sim/flooduav/run.sh up      # builds unity/FloodUAVPatched.app on first use
+   sim/flooduav/run.sh down
+   ```
+
+Open `http://localhost:8001`. The first `up` takes about a minute until `search policies ready` appears in `runs/flooduav_ui/server.log`.
+`build.sh` signs the patched app ad hoc and clears the download quarantine, so macOS starts it without a Gatekeeper prompt.
+Unity opens a small FloodUAV window with a preview of the views. Leave it open and stop everything with `run.sh down`, not Cmd+Q (`sim/flooduav/README.md`).
+After replacing `unity/FloodUAV.app`, delete `unity/FloodUAVPatched.app` so `up` patches the new build.
