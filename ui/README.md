@@ -50,6 +50,10 @@ Without it they show a placeholder.
 - Mission options (Mission panel): `Auto switch to rescue` lets a search drone fly a rescue when that is faster than waiting for a rescue drone, then search again.
   It does nothing in `rl_unity` mode.
   The rule is in `docs/PROTOCOL.md` section 4.3.
+  `Re-check detections` makes a search drone look again from beside a detection before it is confirmed (hidden in `rl_unity`).
+  Defaults: Expected survivors 15; auto switch, auto dispatch, auto replace and auto stage on; re-check off.
+- Drone speed: the cap starts at 15 m/s, or 3 m/s in `rl_unity`. Changing the mode before Start resets it to that mode's default.
+  In `rl_unity` it applies to the agent only when `Training flight limits` is unticked.
 - `Settings` (top bar): show or hide the true survivor positions on the map.
 
 ## Screenshots

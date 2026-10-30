@@ -188,6 +188,7 @@ Events are also written to the mission log, except "preparing the search policie
 | `set_mode` | `mode` | Changes the search mode mid-mission. Switching into `rl_unity` resets the agent flight limits to `training` |
 | `set_agent` | `agent` (an `agents` id) | `rl_unity` only. Picks the trained agent that flies D1, also mid-mission |
 | `set_agent_limits` | `limits` (`training` or `bridge`) | `rl_unity` only. `training` (default): the agent flies with the limits it was trained with, and the drone speed cap is off. `bridge`: the operator's speed cap applies. The state message reports it as `agent_limits` |
+| `set_drone_speed` | `speed` (m/s, above 0) | Horizontal speed cap for all drones, also mid-mission. The state message reports it as `drone_speed` (null: each vehicle's own limit). The UI sends it on Start: 15 m/s, or 3 m/s in `rl_unity` |
 | `recall` | `drone` | Drone returns home (RETURNING) |
 | `standby` | `drone`, `point` ([lon, lat], optional, default home) | Drone parks at the point (STANDBY) |
 | `launch` | `drone`, `task` (`search` or `rescue`), `survivor` (for rescue, optional) | Launches a standby or idle drone |
