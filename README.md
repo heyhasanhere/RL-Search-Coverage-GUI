@@ -57,6 +57,10 @@ uv run python -m sar.mission.server --backend kinematic --speed 5 --show-truth
 
 Open http://localhost:8000.
 
+At startup the server compiles the search policies for every grid size in the background and prints `search policies ready`.
+This takes about 30 s on a laptop CPU, and about 10 s on later starts because compiled code is cached in `runs/jax_cache`.
+A mission started before that waits for it. `--no-warm` skips the startup compile, and `--jax-cache ""` turns the cache off.
+
 FloodUAV on the Linux GPU machine (UI on port 8001):
 
 ```bash

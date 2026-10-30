@@ -76,4 +76,5 @@ Run `sim/flooduav/run.sh down` in its own SSH call, because its `pkill` patterns
 
 Unity renders on GPU 0.
 The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation.
+At startup it compiles the search policies for every grid size there, and `runs/flooduav_ui/server.log` shows `search policies ready` when done.
 Ports: UI 8001, bridge 8101.
