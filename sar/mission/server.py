@@ -391,12 +391,36 @@ def parser():
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--control-password", default="",
                     help="operator password; viewers without it can only watch (default: $SAR_CONTROL_PASSWORD)")
+    ap.add_argument("--warm", action=argparse.BooleanOptionalAction, default=True,
+                    help="compile the search policies for every grid size at startup")
+    ap.add_argument("--jax-cache", default=str(ROOT / "runs/jax_cache"),
+                    help="on-disk JAX compile cache, so a restart skips compiling (empty: off)")
     return ap
+
+
+def warm_all(orch: Orchestrator):
+    """Compile every grid size in a worker thread, so no mission start waits on a compile."""
+    import threading
+    from sar.mission.search_policy import GRIDS
+
+    def run():
+        for g in GRIDS:
+            if g <= orch.cfg.grid:
+                orch.warm_policies(g)
+        print("search policies ready", flush=True)
+
+    threading.Thread(target=run, name="warm-policies", daemon=True).start()
 
 
 def main():
     args = parser().parse_args()
+    if args.jax_cache:
+        import jax
+        jax.config.update("jax_compilation_cache_dir", args.jax_cache)
+        jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)  # most compiles are under 1 s
     orch = build(args)
+    if args.warm:
+        warm_all(orch)
     uvicorn.run(make_app(args, orch), host=args.host, port=args.port, log_level="warning")
 
 

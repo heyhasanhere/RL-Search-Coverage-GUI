@@ -967,7 +967,7 @@ class Orchestrator:
             if g not in self._warm_grids:
                 # shown on the UI only: a log row before the mission row would split the replay
                 self._publish({"type": "event", "t": 0.0, "level": "info",
-                               "text": "compiling the search policies (first mission only)"})
+                               "text": "preparing the search policies"})
             await asyncio.to_thread(self.warm_policies, g)
             self.start_mission(polygon=msg["polygon"], lkp=msg.get("lkp"), mode=msg.get("mode", "rl"),
                                n_search=int(msg.get("n_search", 2)),
