@@ -9,7 +9,7 @@
 //   FLOODUAV_TILT      max tilt, degrees, 1..25 (build default 12); sets the horizontal acceleration
 //   FLOODUAV_AIRCRAFT  comma-separated name=value float fields of CargoAircraftController
 //   FLOODUAV_TIME_LIMIT mission time limit, s
-//   FLOODUAV_SPLIT     1: split the 2640x720 screen (Layout below)
+//   FLOODUAV_SPLIT     1: split the 3920x720 screen (Layout below)
 //   FLOODUAV_INFO      path of a JSON file with the boundary, start points, survivors and camera field of view
 //   FLOODUAV_FOLLOW    follow camera offset "x,y,z" behind the drone (build default 0,12,-40)
 //   FLOODUAV_FLEET     1: the pickup drone becomes a second drone the bridge flies (Fleet.cs)
@@ -38,11 +38,13 @@ namespace FloodPatch
         static readonly Camera[] droneCams = new Camera[2];
         static readonly Quaternion[] camBase = new Quaternion[2];
         static Camera overview;
+        // the follow cameras (CargoAircraftCamera): 0 the main camera behind the search drone, 1 a copy behind the pickup drone
+        static readonly Component[] followCams = new Component[2];
 
         // Screen layout in pixels (x, y from the top, w, h); the bridge crops the same regions.
-        const float SW = 2640f, SH = 720f;
+        const float SW = 3920f, SH = 720f;
         static readonly float[] Follow = { 0, 0, 1280, 720 }, Cam0 = { 1280, 0, 640, 360 },
-            Cam1 = { 1280, 360, 640, 360 }, Overview = { 1920, 0, 720, 720 };
+            Cam1 = { 1280, 360, 640, 360 }, Overview = { 1920, 0, 720, 720 }, Follow1 = { 2640, 0, 1280, 720 };
 
         static Rect R(float[] r)
         {
@@ -112,6 +114,7 @@ namespace FloodPatch
                                    pickup != null ? pickup.transform.position : ((Transform)Get(mission, "droneStartPoint")).position };
                     if (Env("FLOODUAV_SOFT", 0f) > 0.5f)
                         Soften(mission);
+                    followCams[0] = Camera.main == null ? null : Camera.main.GetComponent("CargoAircraftCamera");
                     if (pickup != null && Env("FLOODUAV_FLEET", 0f) > 0.5f)
                         Fleet.Setup(mission, pickup);
                     if (Env("FLOODUAV_SPLIT", 0f) > 0.5f)
@@ -153,13 +156,36 @@ namespace FloodPatch
         static void FollowOffset()
         {
             string s = Environment.GetEnvironmentVariable("FLOODUAV_FOLLOW");
-            Component cam = Camera.main == null ? null : Camera.main.GetComponent("CargoAircraftCamera");
-            if (string.IsNullOrEmpty(s) || cam == null)
+            if (string.IsNullOrEmpty(s))
                 return;
             string[] p = s.Split(',');
             Vector3 v = new Vector3(float.Parse(p[0], CultureInfo.InvariantCulture),
                 float.Parse(p[1], CultureInfo.InvariantCulture), float.Parse(p[2], CultureInfo.InvariantCulture));
-            cam.GetType().GetField("offset").SetValue(cam, v);
+            for (int k = 0; k < followCams.Length; k++)
+                FollowView(k, v);
+        }
+
+        // Offset of follow camera k from its drone.
+        public static void FollowView(int k, Vector3 offset)
+        {
+            if (k >= 0 && k < followCams.Length && followCams[k] != null)
+                followCams[k].GetType().GetField("offset").SetValue(followCams[k], offset);
+        }
+
+        // A copy of the main camera, its follow script and post-processing included, that follows `target`.
+        static Component FollowCopy(Camera main, Transform target, float[] rect)
+        {
+            GameObject go = UnityEngine.Object.Instantiate(main.gameObject);
+            go.name = "FloodPatchFollow1";
+            go.tag = "Untagged";      // Camera.main stays the original
+            Component ear = go.GetComponent("AudioListener");
+            if (ear != null)
+                UnityEngine.Object.Destroy(ear);
+            go.GetComponent<Camera>().rect = R(rect);
+            Component follow = go.GetComponent("CargoAircraftCamera");
+            if (follow != null)
+                follow.GetType().GetField("target").SetValue(follow, target);
+            return follow;
         }
 
         static Camera DroneCam(Camera main, Transform parent, Quaternion local, float fov, float[] rect, float depth, float near)
@@ -208,6 +234,8 @@ namespace FloodPatch
                     droneCams[1] = DroneCam(main, pickup.transform, camBase[1], search.fieldOfView, Cam1, 52f, 4f);
                 }
             }
+            if (pickup != null && main != null && followCams[0] != null)
+                followCams[1] = FollowCopy(main, pickup.transform, Follow1);
 
             Bounds b = box.bounds;
             GameObject top = new GameObject("FloodPatchOverview");

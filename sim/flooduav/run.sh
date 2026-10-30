@@ -17,7 +17,7 @@ if [ "${1:-up}" = down ]; then
 fi
 mkdir -p $LOG
 [ -x unity/SearchPickupPatched/FloodUAV.x86_64 ] || bash sim/flooduav/patch/build.sh
-[ -e /tmp/.X11-unix/X${DISP#:} ] || { Xvfb $DISP -screen 0 2640x720x24 >/dev/null 2>&1 & sleep 2; }
+[ -e /tmp/.X11-unix/X${DISP#:} ] || { Xvfb $DISP -screen 0 3920x720x24 >/dev/null 2>&1 & sleep 2; }
 export DISPLAY=$DISP PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 # The patch sets runInBackground; the focus loop is a fallback for players that still pause.
 ( exec -a FLOODUAV_FOCUS bash -c 'while true; do for w in $(xdotool search --name FloodUAV 2>/dev/null); do xdotool windowfocus $w 2>/dev/null; done; sleep 5; done' ) &

@@ -4,9 +4,8 @@
 //
 // Bridge to Unity (float lists):
 //   [1, forward, sideways, vertical, yaw]   pickup drone commands, -1..1 (DroneVelocityController)
-//   [2, drone]                              follow camera target: 0 search drone, 1 pickup drone
 //   [3]                                     pickup drone back to its base pad
-//   [4, 0, distance, yaw, pitch]            follow camera offset: distance (m), yaw from behind, pitch above (deg)
+//   [4, 0, distance, yaw, pitch, k]         follow camera k offset: distance (m), yaw from behind, pitch above (deg)
 //   [4, 1 + k, fov, pan, tilt]              drone camera k: field of view, pan sideways, tilt from straight down (deg)
 //   [5, size]                               write a size x size top-down map to FLOODUAV_MAP
 //   [6, seed, count]                        survivor layout for the next mission start (Layout.cs; -1: the build's)
@@ -59,8 +58,6 @@ namespace FloodPatch
         Transform pickupBase;
         BoxCollider boundary;
         LayerMask mask;
-        Component follow;
-        Transform[] targets;
         readonly object[] cmd = { 0f, 0f, 0f, 0f };
 
         public static void Setup(MonoBehaviour mission, MonoBehaviour pickupAgent)
@@ -86,8 +83,6 @@ namespace FloodPatch
             pickupAgent.GetType().GetMethod("SetExternalNavigation").Invoke(pickupAgent, new object[] { true });
 
             Component aircraft = (Component)Hook.Get(mission, "aircraft");
-            f.targets = new[] { aircraft.transform, pickupAgent.transform };
-            f.follow = Camera.main == null ? null : Camera.main.GetComponent("CargoAircraftCamera");
 
             f.channel = new FleetChannel();
             SideChannelManager.RegisterSideChannel(f.channel);
@@ -110,20 +105,15 @@ namespace FloodPatch
             if (kind == 1 && v.Count >= 5)
                 for (int i = 0; i < 4; i++)
                     cmd[i] = Mathf.Clamp(v[i + 1], -1f, 1f);
-            else if (kind == 2 && v.Count >= 2 && follow != null)
-            {
-                int k = Mathf.Clamp(Mathf.RoundToInt(v[1]), 0, targets.Length - 1);
-                follow.GetType().GetField("target").SetValue(follow, targets[k]);
-            }
             else if (kind == 3)
                 ResetPickup();
             else if (kind == 4 && v.Count >= 5)
             {
                 int view = Mathf.RoundToInt(v[1]);
-                if (view == 0 && follow != null)
+                if (view == 0)
                 {
                     Vector3 offset = Quaternion.Euler(Mathf.Clamp(v[4], -10f, 89f), v[3], 0f) * new Vector3(0f, 0f, -Mathf.Max(v[2], 2f));
-                    follow.GetType().GetField("offset").SetValue(follow, offset);
+                    Hook.FollowView(v.Count >= 6 ? Mathf.RoundToInt(v[5]) : 0, offset);
                 }
                 else if (view >= 1)
                     Hook.DroneView(view - 1, v[2], v[3], v[4]);

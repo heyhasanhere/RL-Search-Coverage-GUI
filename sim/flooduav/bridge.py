@@ -1,7 +1,7 @@
 """FloodUAV bridge: runs the patched Unity build and serves it to the mission server.
 
 The mission server (sar/mission/flooduav.py) talks to this bridge the way it talks to the
-Isaac bridge: sim time, video streams and a follow-view call, plus a drone state and a
+Isaac bridge: sim time and video streams, plus a drone state and a
 setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
 
   GET  /time               {"sim_time": s}
@@ -16,11 +16,14 @@ setpoint endpoint for the two Unity drones. See sim/flooduav/README.md.
                            reset; no seed: a random one, -1: the build's fixed survivors; no count: the build's 15.
                            shares: terrain mix weights by SHARE_KEYS, normalized (none: the default mix).
                            Returns once the new positions are in /info.
-  POST /view               {"drone": k} follow camera target
-  POST /camera             {"view": "follow", "distance", "yaw", "pitch"} or {"view": "drone", "drone": k, "fov", "pan", "tilt"}
-  GET  /stream/follow      main Unity view
+  POST /camera             {"view": "follow", "drone": k, "distance", "yaw", "pitch"} or {"view": "drone", "drone": k, "fov", "pan", "tilt"}
+  GET  /stream/follow      main Unity view, following drone 0
+  GET  /stream/follow1     follow view of drone 1
   GET  /stream/cam0, cam1  drone cameras (0 search drone, 1 the build's pickup drone)
   GET  /stream/overview    square top-down view
+                           ?small=1: at most SMALL_W wide and SMALL_FPS frames a second (the UI's fallback)
+  GET  /h264/<region>      the same views as H.264 (follow, follow1, cam0, cam1, overview): frames of
+                           [4-byte big-endian length][1 byte: 1 key frame, 0 not][Annex B access unit]
   GET  /overview.jpg       one top-down frame from the live stream
   GET  /map.jpg            one high resolution top-down render (--map-px), for the map background
 
@@ -32,7 +35,9 @@ import argparse
 import json
 import math
 import os
+import queue
 import re
+import struct
 import subprocess
 import threading
 import time
@@ -55,10 +60,14 @@ RAYS = slice(16, 24)       # 8 horizontal obstacle rays / 30 m, from forward clo
 UP_RAY, DOWN_RAY = 24, 25
 SIM_DT = 0.1               # one decision = 5 physics steps of 0.02 s
 
-# screen layout from Hook.SplitViews: main view, the two drone cameras stacked, square overview
-W, H = 2640, 720
+# screen layout from Hook.SplitViews: follow view of drone 0, the two drone cameras stacked,
+# square overview, follow view of drone 1
+W, H = 3920, 720
 REGIONS = {"follow": (0, 0, 1280, 720), "cam0": (1280, 0, 640, 360), "cam1": (1280, 360, 640, 360),
-           "overview": (1920, 0, 720, 720)}
+           "overview": (1920, 0, 720, 720), "follow1": (2640, 0, 1280, 720)}
+SMALL_W, SMALL_FPS = 640, 6   # /stream/<region>?small=1
+AUD = b"\x00\x00\x01\x09"      # access unit delimiter: each H.264 frame starts with one
+NAL = re.compile(rb"\x00\x00\x01(.)", re.S)
 RECORDED = re.compile(r"Recorded (\S+) at")
 FINISHED = re.compile(r"Mission (Failed|TimedOut|Succeeded): (.*)")
 # survivor terrain mix keys, as in sar/prior/flood_bank.py SHARES and the patch's Layout.ShareKeys
@@ -371,12 +380,9 @@ class Unity:
             elif ahead < -2.0:          # Unity can't keep up: don't try to catch up later
                 wall0, sim0 = time.monotonic(), self.steps
 
-    def view(self, k):
-        self.fleet.send([2, k])
-
     def camera(self, msg):
         if msg.get("view") == "follow":
-            self.fleet.send([4, 0, msg["distance"], msg["yaw"], msg["pitch"]])
+            self.fleet.send([4, 0, msg["distance"], msg["yaw"], msg["pitch"], int(msg.get("drone", 0))])
         else:
             self.fleet.send([4, 1 + int(msg["drone"]), msg["fov"], msg["pan"], msg["tilt"]])
 
@@ -411,9 +417,12 @@ class Grabber:
         threading.Thread(target=self._run, args=(name,), daemon=True).start()
 
     def _run(self, name):
-        x, y, w, h = REGIONS[name]
-        cmd = ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(self.fps), "-video_size", f"{w}x{h}",
-               "-i", f"{self.display}+{x},{y}", "-f", "mjpeg", "-q:v", "5", "pipe:1"]
+        region, small = name.partition("@")[::2]        # "<region>@small": scaled down, fewer frames
+        x, y, w, h = REGIONS[region]
+        fps = min(self.fps, SMALL_FPS) if small else self.fps
+        scale = ["-vf", f"scale={min(w, SMALL_W)}:-2"] if small else []
+        cmd = ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(fps), "-video_size", f"{w}x{h}",
+               "-i", f"{self.display}+{x},{y}", *scale, "-f", "mjpeg", "-q:v", "5", "pipe:1"]
         while True:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
             buf = b""
@@ -436,7 +445,78 @@ class Grabber:
             return self.count.get(name, 0), self.frames.get(name)
 
 
-def make_handler(unity: Unity, grab: Grabber, args):
+class H264:
+    """One ffmpeg x11grab and H.264 encoder per screen region while anyone watches it, shared by its viewers.
+    NVENC on the GPU, libx264 when NVENC fails. A new or lagging viewer waits for the next key frame (one a second)."""
+
+    ENCODERS = (["h264_nvenc", "-preset", "p1", "-tune", "ll", "-bf", "0", "-aud", "1"],
+                ["libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-x264-params", "aud=1"])
+
+    def __init__(self, display: str, fps: int):
+        self.display, self.fps = display, fps
+        self.lock = threading.Lock()
+        self.viewers: dict[str, list[dict]] = {}
+        self.enc = 0
+
+    def watch(self, name) -> dict:
+        """A viewer of region `name`: its queue holds (key frame, access unit)."""
+        v = {"q": queue.Queue(maxsize=2 * self.fps), "key": True}
+        with self.lock:
+            start = name not in self.viewers
+            self.viewers.setdefault(name, []).append(v)
+        if start:
+            threading.Thread(target=self._run, args=(name,), daemon=True).start()
+        return v
+
+    def leave(self, name, v):
+        with self.lock:
+            self.viewers[name].remove(v)
+
+    def _send(self, name, au):
+        key = any(m.group(1)[0] & 0x1F == 5 for m in NAL.finditer(au))
+        with self.lock:
+            for v in self.viewers[name]:
+                if v["key"] and not key:
+                    continue
+                try:
+                    v["q"].put_nowait((key, au))
+                    v["key"] = False
+                except queue.Full:          # it falls behind: skip to the next key frame
+                    v["key"] = True
+
+    def _run(self, name):
+        x, y, w, h = REGIONS[name]
+        while True:
+            with self.lock:
+                if not self.viewers[name]:          # nobody watches: stop, the next viewer starts it again
+                    del self.viewers[name]
+                    return
+            enc = self.ENCODERS[self.enc]
+            cmd = ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(self.fps), "-video_size", f"{w}x{h}",
+                   "-i", f"{self.display}+{x},{y}", "-pix_fmt", "yuv420p", "-c:v", *enc, "-g", str(self.fps),
+                   "-b:v", "2M", "-maxrate", "2M", "-bufsize", "1M", "-bsf:v", "dump_extra", "-f", "h264", "pipe:1"]
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            buf, sent, stopped = b"", False, False
+            while chunk := p.stdout.read1(65536):
+                buf += chunk
+                while (e := buf.find(AUD, 4)) > 0:         # an access unit is complete when the next one starts
+                    self._send(name, buf[:e])
+                    buf, sent = buf[e:], True
+                with self.lock:
+                    stopped = not self.viewers[name]
+                if stopped:
+                    p.kill()
+            p.wait()
+            if stopped:
+                continue
+            if not sent and self.enc + 1 < len(self.ENCODERS):
+                print(f"H.264 encoder {enc[0]} failed for {name}; trying {self.ENCODERS[self.enc + 1][0]}", flush=True)
+                self.enc += 1
+            elif not sent:
+                time.sleep(1.0)
+
+
+def make_handler(unity: Unity, grab: Grabber, h264: H264, args):
     sc = unity.scene
     maps: dict[str, bytes] = {}       # the map render, made once: the town does not change
 
@@ -492,7 +572,26 @@ def make_handler(unity: Unity, grab: Grabber, args):
                 self.end_headers()
                 self.wfile.write(jpg)
                 return
+            if path.startswith("/h264/") and (name := path[len("/h264/"):]) in REGIONS:
+                v = h264.watch(name)
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "video/h264")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    while True:
+                        try:
+                            key, au = v["q"].get(timeout=5.0)
+                        except queue.Empty:
+                            continue
+                        self.wfile.write(struct.pack(">IB", len(au), key) + au)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                finally:
+                    h264.leave(name, v)
             if path.startswith("/stream/") and (name := path[len("/stream/"):]) in REGIONS:
+                if "small=1" in self.path:
+                    name += "@small"
                 self.send_response(200)
                 self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                 self.send_header("Cache-Control", "no-store")
@@ -538,9 +637,6 @@ def make_handler(unity: Unity, grab: Grabber, args):
                 if not unity.new_layout(seed, int(msg.get("count", -1)), shares):
                     return self._json({"error": "Unity did not restart with the new layout"}, 504)
                 return self._json({"ok": True, "seed": seed, "count": len(sc.survivors())})
-            if self.path == "/view":
-                unity.view(int(msg.get("drone", 0)))
-                return self._json({"ok": True})
             if self.path == "/camera":
                 unity.camera(msg)
                 return self._json({"ok": True})
@@ -588,7 +684,7 @@ def main():
     grab = Grabber(args.display, args.fps)
     grab.ensure("overview")      # the UI asks for the map image right away; ffmpeg takes a few seconds to start
     threading.Thread(target=unity.run, daemon=True).start()
-    srv = ThreadingHTTPServer((args.host, args.port), make_handler(unity, grab, args))
+    srv = ThreadingHTTPServer((args.host, args.port), make_handler(unity, grab, H264(args.display, args.fps), args))
     print(f"FloodUAV bridge on http://{args.host}:{args.port}, start {unity.home.round(1).tolist()}", flush=True)
     srv.serve_forever()
 

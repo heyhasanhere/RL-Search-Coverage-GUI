@@ -53,8 +53,8 @@ class Clock:
 
 def stream_url(server: str, view: str) -> str:
     if view.startswith("cam"):
-        return f"{server}/video/camera/{int(view[3:])}.mjpg"
-    return f"{server}/video/{view}.mjpg"
+        return f"{server}/video/camera/{int(view[3:])}.mjpg?full=1"
+    return f"{server}/video/{view}.mjpg?full=1"
 
 
 def jpegs(url: str, stop: threading.Event):

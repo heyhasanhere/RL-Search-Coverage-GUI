@@ -1,15 +1,16 @@
 """MJPEG proxy to the simulation bridge, with detector boxes on the drone cameras.
 
 The FloodUAV bridge (sim/flooduav/bridge.py) exposes:
-  GET  /stream/follow     third-person camera following the selected drone
+  GET  /stream/follow     third-person camera following drone 0
+  GET  /stream/follow<i>  third-person camera following drone i > 0
   GET  /stream/overview   scene overview camera
   GET  /stream/cam<i>     camera of drone i
-  POST /view              {"drone": i} points the follow camera at a drone
 
-This module turns those into the three endpoints the operator UI shows (plan 11.1):
-  GET /video/follow.mjpg
+This module turns those into the endpoints the operator UI shows:
+  GET /video/follow/<i>.mjpg      (/video/follow.mjpg: drone 0)
   GET /video/overview.mjpg
   GET /video/camera/<i>.mjpg      the same as cam<i>, with the latest detector boxes drawn
+  GET /video/h264/<follow|camera>/<i>   the bridge's H.264 stream of the same view, passed through
 
 Boxes come from Orchestrator.latest_detections(i) when the orchestrator keeps them
 Nothing here is required for a mission to
@@ -71,6 +72,15 @@ async def iter_jpegs(url: str, client: httpx.AsyncClient | None = None) -> Async
             buf = buf[end + 2 :]
 
 
+async def passthrough(url: str) -> AsyncIterator[bytes]:
+    """The bridge's stream bytes as they arrive (the H.264 frames of /h264/<region>)."""
+    try:
+        async for chunk in iter_mjpeg(url):
+            yield chunk
+    except (httpx.HTTPError, asyncio.TimeoutError) as exc:
+        log.info("stream %s ended: %r", url, exc)
+
+
 def part(jpg: bytes) -> bytes:
     """One multipart frame under our own boundary."""
     head = f"--{BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n\r\n".encode()
@@ -122,20 +132,13 @@ def draw_boxes(jpeg: bytes, boxes: list, frame_w: int, frame_h: int) -> bytes:
     return buf.getvalue()
 
 
-async def set_view(bridge: str, drone: int, client: httpx.AsyncClient) -> None:
-    """Tell the bridge which drone the follow camera tracks. Failures are logged, not raised."""
-    try:
-        await client.post(f"{bridge}/view", json={"drone": int(drone)}, timeout=3.0)
-    except Exception as exc:
-        log.debug("bridge /view failed: %r", exc)
-
-
-async def frames_with_boxes(bridge: str, drone: int, orch, client: httpx.AsyncClient | None = None) -> AsyncIterator[bytes]:
+async def frames_with_boxes(bridge: str, drone: int, orch, client: httpx.AsyncClient | None = None,
+                            query: str = "") -> AsyncIterator[bytes]:
     """Stream the drone camera as a fresh multipart body, drawing boxes on each frame."""
     own = client is None
     client = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=None))
     try:
-        async for jpg in iter_jpegs(f"{bridge}/stream/cam{int(drone)}", client):
+        async for jpg in iter_jpegs(f"{bridge}/stream/cam{int(drone)}{query}", client):
             latest = None
             getter = getattr(orch, "latest_detections", None)
             if callable(getter):

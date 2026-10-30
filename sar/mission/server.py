@@ -30,7 +30,7 @@ from sar.mission import replay
 from sar.mission.scenario import sample_survivors
 from sar.mission.search_policy import MODES
 from sar.mission.vehicle import BridgeClock, KinematicVehicle, SimClock
-from sar.mission.video import frames, frames_with_boxes, set_view, stream_headers
+from sar.mission.video import frames, frames_with_boxes, passthrough, stream_headers
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -267,28 +267,46 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
     # ------------------------------------------------------------------ video
     # The two 3D views and the drone camera panel (plan 11.1). Without a bridge they
     # answer 404 immediately so the UI shows its placeholder instead of retrying forever.
-    async def _stream(path: str, boxes: int | None = None) -> Response:
+    # The UI gets the bridge's small streams (it prefers H.264 below); ?full=1 asks for full size, for recordings.
+    async def _stream(path: str, request: Request, boxes: int | None = None) -> Response:
         if not bridge:
             return JSONResponse({"error": "no bridge configured"}, status_code=404)
+        query = "" if request.query_params.get("full") == "1" else "?small=1"
         if boxes is None:
-            gen = frames(f"{bridge}/stream/{path}")
+            gen = frames(f"{bridge}/stream/{path}{query}")
         else:
-            gen = frames_with_boxes(bridge, boxes, orch)
+            gen = frames_with_boxes(bridge, boxes, orch, query=query)
         return StreamingResponse(gen, headers=stream_headers())
 
     @app.get("/video/follow.mjpg")
     async def video_follow(request: Request):
-        return await _stream("follow")
+        return await _stream("follow", request)
+
+    @app.get("/video/follow/{drone}.mjpg")
+    async def video_follow_drone(drone: int, request: Request):
+        if not any(d.id == drone for d in orch.drones):
+            return JSONResponse({"error": f"no drone {drone}"}, status_code=404)
+        return await _stream("follow" if drone == 0 else f"follow{drone}", request)
 
     @app.get("/video/overview.mjpg")
     async def video_overview(request: Request):
-        return await _stream("overview")
+        return await _stream("overview", request)
 
     @app.get("/video/camera/{drone}.mjpg")
     async def video_camera(drone: int, request: Request):
         if not any(d.id == drone for d in orch.drones):
             return JSONResponse({"error": f"no drone {drone}"}, status_code=404)
-        return await _stream(f"cam{drone}", boxes=drone)
+        return await _stream(f"cam{drone}", request, boxes=drone)
+
+    # The same views as H.264 frames (the bridge's /h264/<region> format), decoded by the UI with WebCodecs.
+    # No detector boxes: the FloodUAV detector has none.
+    @app.get("/video/h264/{kind}/{drone}")
+    async def video_h264(kind: str, drone: int):
+        if not bridge or kind not in ("follow", "camera") or not any(d.id == drone for d in orch.drones):
+            return JSONResponse({"error": "no such stream"}, status_code=404)
+        region = f"cam{drone}" if kind == "camera" else "follow" if drone == 0 else f"follow{drone}"
+        return StreamingResponse(passthrough(f"{bridge}/h264/{region}"), media_type="video/h264",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
@@ -326,8 +344,6 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
                 except Exception as exc:
                     await sock.send_text(json.dumps({"type": "event", "t": round(orch.t_mission(), 1),
                                                      "level": "error", "text": f"{msg.get('type')}: {exc}"}))
-                else:
-                    await _after_command(msg)
         except WebSocketDisconnect:
             pass
         finally:
@@ -342,24 +358,6 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         with contextlib.suppress(Exception):
             async with httpx.AsyncClient(timeout=3.0) as client:
                 await client.post(f"{bridge}/camera", json=msg)
-
-    async def _after_command(msg: dict) -> None:
-        """Side effects the UI expects from a command but the orchestrator does not own."""
-        if msg.get("type") != "select":
-            return
-        if not bridge:
-            return
-        drone = msg.get("drone")
-        if drone is None and msg.get("survivor") is not None:
-            selector = getattr(orch, "select", None)
-            with contextlib.suppress(Exception):
-                drone = selector() if callable(selector) else None
-        if drone is None:
-            return
-        import httpx
-        with contextlib.suppress(Exception):
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                await set_view(bridge, int(drone), client)
 
     dist = ROOT / "ui" / "dist"
     if dist.exists():

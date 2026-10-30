@@ -326,7 +326,7 @@ export type ClientMsg =
   /** v2: points the follow camera and the camera panel. */
   | { type: "select"; drone?: number; survivor?: number }
   /** Zoom and angle of the 3D follow camera (distance m, yaw and pitch deg) or a drone camera (fov, pan, tilt deg). */
-  | { type: "camera"; view: "follow"; distance: number; yaw: number; pitch: number }
+  | { type: "camera"; view: "follow"; drone: number; distance: number; yaw: number; pitch: number }
   | { type: "camera"; view: "drone"; drone: number; fov: number; pan: number; tilt: number };
 
 export const SURVIVOR_COLORS: Record<SurvivorStatus, string> = {

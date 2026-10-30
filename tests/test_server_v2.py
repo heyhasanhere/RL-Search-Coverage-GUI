@@ -38,7 +38,7 @@ def client():
 
 
 # ------------------------------------------------------------------ video 404
-@pytest.mark.parametrize("path", ["/video/follow.mjpg", "/video/overview.mjpg", "/video/camera/0.mjpg"])
+@pytest.mark.parametrize("path", ["/video/follow.mjpg", "/video/follow/0.mjpg", "/video/overview.mjpg", "/video/camera/0.mjpg"])
 def test_video_404_without_bridge(client, path):
     c, _ = client
     r = c.get(path)

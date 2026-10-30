@@ -14,9 +14,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const wrap = (v: number) => ((((v + 180) % 360) + 360) % 360) - 180;
 const SEND_MS = 100;
 
-/** Zoom and angle of the 3D follow camera and of each drone camera, sent to the sim as they change. */
+/** Zoom and angle of each drone's 3D follow camera and drone camera, sent to the sim as they change. */
 export function useCameraViews(send: (m: ClientMsg) => void) {
-  const [follow, setFollow] = useState<FollowView>(FOLLOW_DEFAULT);
+  const [follows, setFollows] = useState<Record<number, FollowView>>({});
   const [cams, setCams] = useState<Record<number, DroneView>>({});
   // At most one message per view every SEND_MS while the operator drags or scrolls.
   const pending = useRef(new Map<string, ClientMsg>());
@@ -35,11 +35,11 @@ export function useCameraViews(send: (m: ClientMsg) => void) {
   );
 
   const setFollowView = useCallback(
-    (f: (v: FollowView) => FollowView) => {
-      setFollow((prev) => {
-        const v = f(prev);
-        queue("follow", { type: "camera", view: "follow", ...v });
-        return v;
+    (drone: number, f: (v: FollowView) => FollowView) => {
+      setFollows((prev) => {
+        const v = f(prev[drone] ?? FOLLOW_DEFAULT);
+        queue(`follow${drone}`, { type: "camera", view: "follow", drone, ...v });
+        return { ...prev, [drone]: v };
       });
     },
     [queue],
@@ -57,15 +57,16 @@ export function useCameraViews(send: (m: ClientMsg) => void) {
 
   /** Wheel: steps > 0 zoom out. Drag: pixels moved. */
   const followZoom = useCallback(
-    (steps: number) => setFollowView((v) => ({ ...v, distance: clamp(v.distance * 1.12 ** steps, 8, 250) })),
+    (drone: number, steps: number) =>
+      setFollowView(drone, (v) => ({ ...v, distance: clamp(v.distance * 1.12 ** steps, 8, 250) })),
     [setFollowView],
   );
   const followDrag = useCallback(
-    (dx: number, dy: number) =>
-      setFollowView((v) => ({ ...v, yaw: wrap(v.yaw - dx * 0.4), pitch: clamp(v.pitch + dy * 0.3, 2, 89) })),
+    (drone: number, dx: number, dy: number) =>
+      setFollowView(drone, (v) => ({ ...v, yaw: wrap(v.yaw - dx * 0.4), pitch: clamp(v.pitch + dy * 0.3, 2, 89) })),
     [setFollowView],
   );
-  const followReset = useCallback(() => setFollowView(() => FOLLOW_DEFAULT), [setFollowView]);
+  const followReset = useCallback((drone: number) => setFollowView(drone, () => FOLLOW_DEFAULT), [setFollowView]);
   const camZoom = useCallback(
     (drone: number, steps: number) => setDroneView(drone, (v) => ({ ...v, fov: clamp(v.fov * 1.1 ** steps, 8, 100) })),
     [setDroneView],
@@ -80,5 +81,5 @@ export function useCameraViews(send: (m: ClientMsg) => void) {
   );
   const camReset = useCallback((drone: number) => setDroneView(drone, () => DRONE_DEFAULT), [setDroneView]);
 
-  return { follow, cams, followZoom, followDrag, followReset, camZoom, camDrag, camReset };
+  return { follows, cams, followZoom, followDrag, followReset, camZoom, camDrag, camReset };
 }

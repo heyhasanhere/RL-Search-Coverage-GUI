@@ -380,6 +380,8 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify(config));
   }
   if (url.pathname === "/video/follow.mjpg") return serveMjpeg(res, "follow", view);
+  const fm = url.pathname.match(/^\/video\/follow\/(\d+)\.mjpg$/);
+  if (fm) return serveMjpeg(res, "follow", Number(fm[1]));
   if (url.pathname === "/video/overview.mjpg") return serveMjpeg(res, "overview", 0);
   const cm = url.pathname.match(/^\/video\/camera\/(\d+)\.mjpg$/);
   if (cm) return serveMjpeg(res, "camera", Number(cm[1]));

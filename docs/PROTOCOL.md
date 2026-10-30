@@ -13,17 +13,26 @@ Coordinates are always `[lon, lat]` (GeoJSON order). Times are seconds of missio
 | Metrics | `GET /api/metrics` |
 | Replay list | `GET /api/replays` |
 | Replay detail | `GET /api/replay/<id>` |
-| 3D follow camera | `GET /video/follow.mjpg` |
+| 3D follow camera | `GET /video/follow/<drone>.mjpg` (`/video/follow.mjpg`: drone 0) |
 | 3D overview camera | `GET /video/overview.mjpg` |
 | Drone camera with detector boxes | `GET /video/camera/<drone>.mjpg` |
+| H.264 follow or drone camera | `GET /video/h264/<follow\|camera>/<drone>` |
 | Static UI | `GET /` serves `ui/dist` when it exists |
 
 Every message is one JSON object with a `type` field.
 
 The video endpoints proxy the sim bridge (`sim/flooduav/bridge.py`). They are enabled by the
 server argument `--bridge <url>`; without it all three answer 404 with
-`{"error": "no bridge configured"}` and the UI shows a placeholder. The server also posts
-`{"drone": i}` to `<bridge>/view` when the operator selects a drone.
+`{"error": "no bridge configured"}` and the UI shows a placeholder. Each drone has its own
+follow camera.
+
+The MJPEG endpoints send at most 640 px wide and 6 frames a second; `?full=1` gives the full size
+and the bridge's frame rate (used by `scripts/replay_record.py`).
+The H.264 endpoints send the full-size view as `video/h264`: a series of frames, each
+`[4-byte big-endian length][1 byte: 1 key frame, 0 not][Annex B access unit]`, with a key frame
+every second. Drone cameras over H.264 have no detector boxes.
+The UI plays H.264 with WebCodecs where the browser has it and uses MJPEG otherwise.
+Both stop while the browser tab is hidden.
 `GET /api/flood_overview.jpg` is the FloodUAV top-down map image under the map panel. It is
 rendered once by Unity at high resolution (`<bridge>/map.jpg`, 4096 px by default).
 
@@ -180,8 +189,8 @@ Events are also written to the mission log, except "preparing the search policie
 | `reject` | `survivor` | Operator rejects a candidate |
 | `set_options` | any of `auto_dispatch`, `auto_replace`, `auto_stage` | Updates options |
 | `set_speed` | `speed` | Kinematic backend only: simulation speed factor |
-| `select` | `drone` or `survivor` | Points the follow camera and the drone camera panel |
-| `camera` | `view: "follow"` with `distance` (m), `yaw`, `pitch` (degrees), or `view: "drone"` with `drone`, `fov`, `pan`, `tilt` (degrees) | Zoom and angle of the 3D follow camera or of a drone camera. FloodUAV only; the server posts it to `<bridge>/camera` |
+| `select` | `drone` or `survivor` | Points the video panels at a drone |
+| `camera` | `view: "follow"` with `drone`, `distance` (m), `yaw`, `pitch` (degrees), or `view: "drone"` with `drone`, `fov`, `pan`, `tilt` (degrees) | Zoom and angle of the 3D follow camera or of a drone camera. FloodUAV only; the server posts it to `<bridge>/camera` |
 
 ### 4.1 Scenario inputs
 
@@ -219,9 +228,8 @@ not know them ignores them, so an old orchestrator still runs an old UI.
 {"type": "select", "survivor": 4}
 ```
 
-With `drone`, the follow camera tracks that drone and the drone camera panel shows it.
-With `survivor`, the follow camera moves to the survivor and the camera panel follows the
-nearest drone to it. The server tells the sim bridge through `POST <bridge>/view`.
+With `drone`, the video panels that track the selection show that drone.
+With `survivor`, they show the nearest drone to it.
 
 The server answers an invalid command with an `event` of level `error`.
 

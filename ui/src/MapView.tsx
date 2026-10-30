@@ -117,6 +117,15 @@ function syncMarkers<T extends { id: number; pos: LonLat }>(
   }
 }
 
+/** Fit the map to the points, or to the scene image or search area when there are none. */
+function fitMap(map: maplibregl.Map, config: Props["config"], pts?: LonLat[] | null) {
+  const box = pts && pts.length > 2 ? pts : config.map_image?.coordinates ?? config.area;
+  if (!box) return;
+  const lons = box.map((p) => p[0]);
+  const lats = box.map((p) => p[1]);
+  map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], { padding: 10, duration: 0 });
+}
+
 export default function MapView(props: Props) {
   const { config, state, belief, prior, base, showBelief, showCoverage, showTruth, showPrior, drawLocked, picking } = props;
   const container = useRef<HTMLDivElement>(null);
@@ -250,10 +259,8 @@ export default function MapView(props: Props) {
           properties: { mode: "polygon", kind: "area" },
         }]);
         report();
-        const lons = config.area.map((p) => p[0]);
-        const lats = config.area.map((p) => p[1]);
-        map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], { padding: 30, duration: 0 });
       }
+      fitMap(map, config);
       setReady(true);
     });
 
@@ -261,7 +268,15 @@ export default function MapView(props: Props) {
       if (cb.current.picking) cb.current.onPick([e.lngLat.lng, e.lngLat.lat]);
     });
 
+    // The panel changes size with the window and the layout: keep the whole scene in view.
+    const resize = new ResizeObserver(() => {
+      map.resize();
+      fitMap(map, config, cb.current.fitTo);
+    });
+    resize.observe(container.current!);
+
     return () => {
+      resize.disconnect();
       drawRef.current?.stop();
       drawRef.current = null;
       map.remove();
@@ -361,10 +376,7 @@ export default function MapView(props: Props) {
   useEffect(() => {
     const map = mapRef.current;
     if (!ready || !map || !fitKey) return;
-    const pts: LonLat[] = JSON.parse(fitKey);
-    const lons = pts.map((p) => p[0]);
-    const lats = pts.map((p) => p[1]);
-    map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], { padding: 30, duration: 0 });
+    fitMap(map, config, JSON.parse(fitKey));
   }, [ready, fitKey]);
 
   // Live vector layers and markers.

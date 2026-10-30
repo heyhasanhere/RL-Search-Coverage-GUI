@@ -26,22 +26,21 @@ html, body, #root { margin: 0; height: 100%; background: var(--bg); color: var(-
 .login { display: flex; gap: 6px; align-items: center; font-weight: 400; }
 .login input { width: 150px; }
 
+/* The map column is as wide as the two camera rows are tall, so the square scene map fills it.
+   --top: the camera rows' share of the screen below the status bar (37 px), padding and gaps (24 px). */
 .screen {
+  --top: calc((100vh - 61px) * 2 / 2.8 + 6px);
+  --map-w: min(var(--top), 55vw);
   flex: 1; min-height: 0; display: grid; gap: 6px; padding: 6px;
-  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
-  grid-template-rows: minmax(0, 1.05fr) minmax(0, 1fr);
-  grid-template-areas: "three-d right" "bottom bottom";
+  grid-template-columns: minmax(0, 1fr) var(--map-w);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr);
+  grid-template-areas: "three-d map" "cam map" "bottom bottom";
 }
 .cell-3d { grid-area: three-d; position: relative; min-height: 0; }
-.rightcol { grid-area: right; display: grid; gap: 6px; grid-template-rows: minmax(120px, 0.9fr) minmax(0, 1.1fr); min-height: 0; }
-.cell-cam { min-height: 0; position: relative; }
-.cell-map { min-height: 0; position: relative; }
-.bottomrow { grid-area: bottom; display: grid; gap: 6px; grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr); min-height: 0; }
+.cell-cam { grid-area: cam; min-height: 0; position: relative; }
+.cell-map { grid-area: map; min-height: 0; position: relative; }
+.bottomrow { grid-area: bottom; display: grid; gap: 6px; grid-template-columns: minmax(320px, 1fr) var(--map-w); min-height: 0; }
 .cell-drones, .cell-survivors { overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-@media (max-width: 1280px) {
-  .screen { grid-template-columns: minmax(0, 1.3fr) minmax(280px, 1fr); }
-  .bottomrow { grid-template-columns: minmax(280px, 1fr) minmax(0, 1fr); }
-}
 
 .panel { padding: 10px 14px; border-bottom: 1px solid var(--line); }
 h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }

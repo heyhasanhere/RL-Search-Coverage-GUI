@@ -11,7 +11,7 @@ import PriorPanel from "./PriorPanel";
 import RecordedVideo from "./RecordedVideo";
 import ReplayControls from "./ReplayControls";
 import OperatorLogin from "./OperatorLogin";
-import { useCameraViews } from "./useCameraViews";
+import { FOLLOW_DEFAULT, useCameraViews } from "./useCameraViews";
 import { replayBeliefAt, replayEventsAt, replayPrior, replayStateAt } from "./replayState";
 import type { LonLat, Region } from "./types";
 import { fmtTime } from "./types";
@@ -19,6 +19,8 @@ import { fmtTime } from "./types";
 const pct = (x: number | undefined) => (x == null || Number.isNaN(x) ? "-" : `${(x * 100).toFixed(0)}%`);
 const DEFAULT_REGION_WEIGHT = 0.3;
 const TRUTH_KEY = "sar.showTruth";
+
+type Pane = { kind: "follow" | "camera"; drone: number | null };
 
 function loadFlag(key: string): boolean {
   try {
@@ -61,8 +63,13 @@ export default function App() {
     saveFlag(TRUTH_KEY, v);
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Which stream fills the large pane; the other one goes to the small pane on the right.
-  const [mainView, setMainView] = useState<"follow" | "camera">("follow");
+  // Each of the two left panes shows one drone's follow view or camera.
+  // Both start on the 3D follow view. A pane drone of null shows the pane's own drone:
+  // the first drone on top, the second below.
+  const [panes, setPanes] = useState<Pane[]>([{ kind: "follow", drone: null }, { kind: "follow", drone: null }]);
+  const setPane = useCallback((i: number, p: Partial<Pane>) => {
+    setPanes((prev) => prev.map((q, j) => (j === i ? { ...q, ...p } : q)));
+  }, []);
   const [showPrior, setShowPrior] = useState<Set<string>>(new Set());
   const [selectedDrone, setSelectedDrone] = useState<number | null>(null);
   const [selectedSurvivor, setSelectedSurvivor] = useState<number | null>(null);
@@ -171,49 +178,82 @@ export default function App() {
   const running = mission?.status === "running";
   const hasBridge = config?.bridge ?? false;
   const camDrone = selectedDrone ?? state?.drones[0]?.id ?? 0;
-  const camName = state?.drones.find((d) => d.id === camDrone)?.name ?? `D${camDrone}`;
   const openCandidates = state?.survivors.filter((s) => s.status === "candidate").length ?? 0;
   const scenario = prior?.scenario ?? (config?.scenarios?.[0] ?? "wilderness");
 
-  const camView = cv.cams[camDrone];
-  const followPane = isReplay ? (
-    <RecordedVideo
-      video={rec?.videos?.follow}
-      t={t} playing={playing} speed={speed}
-      title="3D follow (recorded)"
-      placeholder={rec ? "The follow view was not recorded for this mission" : "Pick a recorded mission"}
-    />
-  ) : (
-    <VideoPanel
-      src="video/follow.mjpg"
-      title={`3D follow - ${camName}`}
-      streamKey={`follow-${camDrone}`}
-      placeholder={hasBridge ? "Waiting for the sim bridge stream" : "3D view needs a sim bridge (--bridge)"}
-      onZoom={hasBridge ? cv.followZoom : undefined}
-      onDrag={hasBridge ? cv.followDrag : undefined}
-      onReset={hasBridge ? cv.followReset : undefined}
-      hint={`${cv.follow.distance.toFixed(0)} m, ${cv.follow.pitch.toFixed(0)}° up`}
-    />
-  );
-  const cameraPane = isReplay ? (
-    <RecordedVideo
-      video={rec?.videos?.[`cam${camDrone}`]}
-      t={t} playing={playing} speed={speed}
-      title={`Drone camera - ${camName} (recorded)`}
-      placeholder="The drone camera was not recorded for this mission"
-    />
-  ) : (
-    <VideoPanel
-      src={`video/camera/${camDrone}.mjpg`}
-      title={`Drone camera - ${camName}`}
-      streamKey={camDrone}
-      placeholder={hasBridge ? "Waiting for the drone camera" : "Drone camera needs a sim bridge (--bridge)"}
-      onZoom={hasBridge ? (s) => cv.camZoom(camDrone, s) : undefined}
-      onDrag={hasBridge ? (dx, dy) => cv.camDrag(camDrone, dx, dy) : undefined}
-      onReset={hasBridge ? () => cv.camReset(camDrone) : undefined}
-      hint={camView ? `fov ${camView.fov.toFixed(0)}°, tilt ${camView.tilt.toFixed(0)}°` : "fov 60°, straight down"}
-    />
-  );
+  const droneName = (k: number) => state?.drones.find((d) => d.id === k)?.name ?? `D${k}`;
+  const followPane = (k: number) => {
+    const name = droneName(k);
+    const view = cv.follows[k] ?? FOLLOW_DEFAULT;
+    return isReplay ? (
+      <RecordedVideo
+        video={rec?.videos?.[k === 0 ? "follow" : `follow${k}`]}
+        t={t} playing={playing} speed={speed}
+        title={`3D follow - ${name} (recorded)`}
+        placeholder={rec ? "The follow view was not recorded for this drone" : "Pick a recorded mission"}
+      />
+    ) : (
+      <VideoPanel
+        src={`video/follow/${k}.mjpg`}
+        h264Src={`video/h264/follow/${k}`}
+        title={`3D follow - ${name}`}
+        streamKey={`follow-${k}`}
+        placeholder={hasBridge ? "Waiting for the sim bridge stream" : "3D view needs a sim bridge (--bridge)"}
+        onZoom={hasBridge ? (s) => cv.followZoom(k, s) : undefined}
+        onDrag={hasBridge ? (dx, dy) => cv.followDrag(k, dx, dy) : undefined}
+        onReset={hasBridge ? () => cv.followReset(k) : undefined}
+        hint={`${view.distance.toFixed(0)} m, ${view.pitch.toFixed(0)}° up`}
+      />
+    );
+  };
+  const cameraPane = (k: number) => {
+    const name = droneName(k);
+    const view = cv.cams[k];
+    return isReplay ? (
+      <RecordedVideo
+        video={rec?.videos?.[`cam${k}`]}
+        t={t} playing={playing} speed={speed}
+        title={`Drone camera - ${name} (recorded)`}
+        placeholder="The drone camera was not recorded for this mission"
+      />
+    ) : (
+      <VideoPanel
+        src={`video/camera/${k}.mjpg`}
+        h264Src={`video/h264/camera/${k}`}
+        title={`Drone camera - ${name}`}
+        streamKey={k}
+        placeholder={hasBridge ? "Waiting for the drone camera" : "Drone camera needs a sim bridge (--bridge)"}
+        onZoom={hasBridge ? (s) => cv.camZoom(k, s) : undefined}
+        onDrag={hasBridge ? (dx, dy) => cv.camDrag(k, dx, dy) : undefined}
+        onReset={hasBridge ? () => cv.camReset(k) : undefined}
+        hint={view ? `fov ${view.fov.toFixed(0)}°, tilt ${view.tilt.toFixed(0)}°` : "fov 60°, straight down"}
+      />
+    );
+  };
+  const paneCell = (i: number, area: string) => {
+    const pane = panes[i];
+    const drone = pane.drone ?? state?.drones[i]?.id ?? camDrone;
+    return (
+      <div className={`cell ${area}`}>
+        {pane.kind === "follow" ? followPane(drone) : cameraPane(drone)}
+        <div className="view-toggle">
+          <button className={pane.kind === "follow" ? "active" : ""} onClick={() => setPane(i, { kind: "follow" })}
+            title="3D follow view of one drone">3D follow</button>
+          <button className={pane.kind === "camera" ? "active" : ""} onClick={() => setPane(i, { kind: "camera" })}
+            title="Camera of one drone">Drone camera</button>
+        </div>
+        {state && state.drones.length > 1 && (
+          <div className="view-toggle cam-tabs">
+            {state.drones.map((d) => (
+              <button key={d.id} className={d.id === drone ? "active" : ""} onClick={() => setPane(i, { drone: d.id })}>
+                {d.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="app">
@@ -269,61 +309,37 @@ export default function App() {
       </header>
 
       <div className="screen">
-        <div className="cell cell-3d">
-          {mainView === "follow" ? followPane : cameraPane}
-          {!isReplay && (
-            <div className="view-toggle">
-              <button className={mainView === "follow" ? "active" : ""} onClick={() => setMainView("follow")}
-                title="3D follow view in the large pane">3D follow</button>
-              <button className={mainView === "camera" ? "active" : ""} onClick={() => setMainView("camera")}
-                title="Drone camera in the large pane">Drone camera</button>
-            </div>
+        {paneCell(0, "cell-3d")}
+        {paneCell(1, "cell-cam")}
+        <div className="cell cell-map">
+          {config ? (
+            <MapView
+              config={config}
+              state={state}
+              belief={belief}
+              prior={prior}
+              base={base}
+              showBelief={showBelief}
+              showCoverage={showCoverage}
+              showTruth={showTruth}
+              showPrior={showPrior}
+              drawLocked={running || isReplay}
+              needArea={!polygon}
+              fitTo={isReplay ? rec?.meta.polygon : null}
+              picking={pickingFor != null}
+              selectedDrone={selectedDrone}
+              regionWeight={regionWeight}
+              drawKind={drawTool}
+              onToolChange={setDrawTool}
+              onPick={onPick}
+              onAreaChange={onAreaChange}
+              onSelectDrone={selectDrone}
+              onSelectSurvivor={selectSurvivor}
+            />
+          ) : (
+            <div className="panel muted">Loading /api/config ...</div>
           )}
-        </div>
-
-        <div className="rightcol">
-          <div className="cell cell-cam">
-            {mainView === "follow" ? cameraPane : followPane}
-            {state && state.drones.length > 1 && (
-              <div className="view-toggle cam-tabs">
-                {state.drones.map((d) => (
-                  <button key={d.id} className={d.id === camDrone ? "active" : ""} onClick={() => selectDrone(d.id)}>
-                    {d.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="cell cell-map">
-            {config ? (
-              <MapView
-                config={config}
-                state={state}
-                belief={belief}
-                prior={prior}
-                base={base}
-                showBelief={showBelief}
-                showCoverage={showCoverage}
-                showTruth={showTruth}
-                showPrior={showPrior}
-                drawLocked={running || isReplay}
-                needArea={!polygon}
-                fitTo={isReplay ? rec?.meta.polygon : null}
-                picking={pickingFor != null}
-                selectedDrone={selectedDrone}
-                regionWeight={regionWeight}
-                drawKind={drawTool}
-                onToolChange={setDrawTool}
-                onPick={onPick}
-                onAreaChange={onAreaChange}
-                onSelectDrone={selectDrone}
-                onSelectSurvivor={selectSurvivor}
-              />
-            ) : (
-              <div className="panel muted">Loading /api/config ...</div>
-            )}
-            <PriorPanel prior={prior} show={showPrior} onToggle={togglePrior} />
-          </div>
+          <PriorPanel prior={prior} show={showPrior} onToggle={togglePrior} />
         </div>
 
         <div className="bottomrow">

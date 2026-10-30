@@ -27,8 +27,7 @@ Without it they show a placeholder.
 | Panel | Position | Content |
 |---|---|---|
 | Status bar | top | Scenario, mission, mode, time, found, candidates, covered, remaining |
-| 3D view | large, top left | Follow camera on the selected drone, with a Follow / Overview toggle. A 3D Follow / Drone Camera toggle swaps it with the drone camera panel |
-| Drone camera | top right, upper | Downward camera of the selected drone, with detector boxes drawn server side |
+| Video panes | left, two stacked | Each pane shows the 3D follow view or the downward camera of one drone. Both start on 3D follow, the top pane on D1 and the bottom pane on D2. The 3D Follow / Drone Camera toggle and the drone tabs change each pane. Video is H.264 decoded by the browser (WebCodecs), or MJPEG where the browser cannot decode it, and stops while the tab is hidden |
 | Map and grid | top right, lower | Area, belief, coverage, routes, altitude level per drone, prior layer toggles |
 | Mission and drones | bottom left | Scenario inputs and per-drone state, level, AGL, battery, sortie, recall, standby |
 | Survivors and events | bottom right | Candidates with snapshot, confirm and reject, confirmed and rescued, event log |
@@ -41,8 +40,8 @@ Without it they show a placeholder.
 - Draw several regions to mark more than one priority area.
 - Start is disabled until the area is within `max_area_km2` and the bounding-box side is
   within `max_grid * cell_m`. Wilderness also needs a last-seen point.
-- Clicking a drone in the list or on the map sends `{"type":"select","drone":i}` and switches
-  both video panels to it. Clicking a survivor sends `{"type":"select","survivor":id}`.
+- Clicking a drone in the list or on the map sends `{"type":"select","drone":i}`.
+  Clicking a survivor sends `{"type":"select","survivor":id}`.
 - Drone `Standby`: click the map to choose the point, or `At home`.
 - 3D follow and drone camera (FloodUAV): scroll to zoom, drag to turn, double-click to reset.
 - `Restart` resets the world and starts the same mission again. `Reset` resets the world and waits for Start.
