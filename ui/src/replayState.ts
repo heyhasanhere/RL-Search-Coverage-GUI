@@ -91,7 +91,7 @@ export function replayStateAt(replay: Replay, t: number): StateMsg {
       expected_found: found, covered_fraction: frame?.covered ?? NaN,
     },
     drones, survivors: survivorsAt(replay, t),
-    options: { auto_dispatch: false, auto_replace: false, auto_stage: false }, truth: null,
+    options: { auto_dispatch: false, auto_replace: false, auto_stage: false, auto_switch: false }, truth: null,
   };
 }
 

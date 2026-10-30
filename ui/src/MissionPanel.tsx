@@ -17,6 +17,7 @@ const OPTION_LABELS: [keyof Options, string][] = [
   ["auto_dispatch", "Auto dispatch"],
   ["auto_replace", "Auto replace"],
   ["auto_stage", "Auto stage"],
+  ["auto_switch", "Auto switch to rescue"],
 ];
 
 const MODE_HINTS: Record<string, string> = {
@@ -76,7 +77,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
   const [lkpTimeH, setLkpTimeH] = useState(6);
   const [waterLevel, setWaterLevel] = useState(10.5);   // m above the normal river; floods the demo town
-  const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false });
+  const [options, setOptions] = useState<Options>({ auto_dispatch: true, auto_replace: false, auto_stage: false, auto_switch: true });
   const [speed, setSpeed] = useState(1);
   const [droneSpeed, setDroneSpeed] = useState<number | null>(null);
   const shownSpeed = droneSpeed ?? state?.drone_speed ?? 10;
@@ -94,7 +95,7 @@ export default function MissionPanel({ config, state, polygon, lkp, regions, sen
   }, [running, srvMode]);
   useEffect(() => {
     if (srvOpts) setOptions(srvOpts);
-  }, [srvOpts?.auto_dispatch, srvOpts?.auto_replace, srvOpts?.auto_stage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [srvOpts?.auto_dispatch, srvOpts?.auto_replace, srvOpts?.auto_stage, srvOpts?.auto_switch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const m = useMemo(() => (polygon && polygon.length >= 4 ? measure(polygon) : null), [polygon]);
   const maxSide = config.max_grid * config.cell_m;

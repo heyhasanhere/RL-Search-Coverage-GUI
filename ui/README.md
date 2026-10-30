@@ -47,6 +47,9 @@ Without it they show a placeholder.
 - `Restart` resets the world and starts the same mission again. `Reset` resets the world and waits for Start.
 - Survivor terrain mix (FloodUAV): percent of new survivors on roofs, high ground, bridges, water and anywhere
   (default 50 / 25 / 10 / 10 / 5). `New survivors` places them by it, and the search prior uses the same mix.
+- Mission options (Mission panel): `Auto switch to rescue` lets a search drone fly a rescue when that is faster than waiting for a rescue drone, then search again.
+  It does nothing in `rl_unity` mode.
+  The rule is in `docs/PROTOCOL.md` section 4.3.
 - `Settings` (top bar): show or hide the true survivor positions on the map.
 
 ## Screenshots

@@ -109,5 +109,6 @@ class MissionConfig:
     relook_offset: float = 8.0         # displaced viewpoint for the persistence check
     relook_hold: float = 2.0           # s hovering at the re-look point
     rescue_hold: float = 20.0          # s over a survivor before the rescue drone is free
+    switch_margin_s: float = 30.0      # s a search drone's switch to rescue must beat the rescue drones by
     home_spacing: float = 6.0          # m between drone home pads
     stage_period: float = 30.0         # s between auto-stage updates

@@ -35,6 +35,7 @@ LEAD_SPEED = 3.0              # m/s the carrot may run ahead of the drone's spee
 # the other search drones use rl. The orchestrator only counts the agent's looks and finds.
 AGENT_MODE = "rl_unity"
 AGENT_LOOK_AGL = 10.0         # m above the ground below; lower, the agent's camera look does not count
+TAKEOFF_S = 10.0              # s added to a landed drone's arrival estimate
 
 
 @dataclass
@@ -61,6 +62,7 @@ class Drone:
     survivor: int | None = None
     entry: tuple | None = None
     agent: bool = False                           # the sim's trained agent flies it (AGENT_MODE)
+    resume_search: bool = False                   # switched from search by _auto_switch: search again after the rescue
 
 
 @dataclass
@@ -115,7 +117,7 @@ class Orchestrator:
         self._warm_grids: set[int] = set()
         self._link_grace = -1e9                  # no lost-link check before this time (after a stall)
         self.survivors: dict[int, Survivor] = {}
-        self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False}
+        self.options = {"auto_dispatch": True, "auto_replace": False, "auto_stage": False, "auto_switch": True}
         self.events: list[dict] = []
         self.subscribers: list[asyncio.Queue] = []
         self._next_sid = 1          # survivor numbers start at 1 in every mission
@@ -214,6 +216,8 @@ class Orchestrator:
             d.task.cancel()
         d.state, d.task_text = state, text
         d.path, d.carrot, d.relook, d.confirming = [], None, None, False
+        if state != "RESCUE_TRANSIT":
+            d.resume_search = False
         if state != "SEARCH":
             d.segment, d.plan_cell, d.entry = [], None, None
         d.task = asyncio.create_task(self._guard(d, coro))
@@ -842,6 +846,10 @@ class Orchestrator:
         self.event(f"{d.name} reached survivor #{s.id}")
         self.log("reached", sid=s.id, drone=d.id, pos=self.lonlat(s.e, s.n), true=self._is_true(s))
         d.target, d.survivor = None, None
+        m = self.mission
+        if d.resume_search and m and m.status == "running" and not m.stopping:
+            self._set_task(d, self._search(d), "SEARCH", "back to search")
+            return
         point = d.standby_point if d.standby_point is not None else d.vehicle.home[:2]
         self._set_task(d, self._standby(d, point), "STANDBY", "to staging point")
 
@@ -869,6 +877,79 @@ class Orchestrator:
         await self._return(d, "lost link")
 
     # --------------------------------------------------------------- dispatch
+    def _eta(self, d: Drone, e, n):
+        """Seconds until d could be over (e, n): the rest of its current rescue, then the flight there."""
+        cfg, p = self.cfg, d.vehicle.tel.pos
+        start, t = p[:2], 0.0
+        if d.state in ("RESCUE_TRANSIT", "ON_SURVIVOR") and d.target is not None:
+            if d.state == "RESCUE_TRANSIT":
+                t += math.hypot(*(d.target - p[:2])) / cfg.transit_speed
+            t += cfg.rescue_hold
+            start = d.target
+        elif d.state not in ("IDLE", "STANDBY", "SEARCH"):
+            return math.inf
+        elif not d.vehicle.tel.in_air:
+            t += TAKEOFF_S
+        t += math.hypot(e - start[0], n - start[1]) / cfg.transit_speed
+        home = d.vehicle.home
+        back = math.hypot(e - home[0], n - home[1]) / cfg.transit_speed
+        if d.battery_s < t + cfg.rescue_hold + back + cfg.land_s + cfg.reserve_s:
+            return math.inf
+        return t
+
+    def _search_loss(self, d: Drone, away):
+        """Survivor-seconds of delay when d stops searching for `away` s: the detections it would
+        make in that time (belief of its segment, one cell look per cell_m / cruise s), each found `away` s later."""
+        m, cfg = self.mission, self.cfg
+        cells = [tuple(c) for c in d.segment] or [self.drone_cell(d)]
+        b = float(np.mean([m.belief[c] if m.grid.in_grid(*c) and m.grid.mask[c] else 0.0 for c in cells]))
+        return cfg.pd * b * cfg.cruise / cfg.cell_m * away * away
+
+    def _auto_switch(self):
+        """Send a search drone to a confirmed survivor when that beats waiting for a rescue drone.
+
+        For each survivor (oldest first) the wait is the soonest a rescue drone can be over it,
+        after the survivors already planned for it. A search drone switches when its arrival plus
+        the search delay it causes (_search_loss) beats the wait by MissionConfig.switch_margin_s;
+        it searches again after the rescue. Not in AGENT_MODE: the Unity agent has its own rules.
+        """
+        m, cfg = self.mission, self.cfg
+        if m.mode == AGENT_MODE:
+            return
+        conf = sorted((s for s in self.survivors.values() if s.status == "confirmed"),
+                      key=lambda s: s.t_confirmed or 0.0)
+        if not conf:
+            return
+        rescuers = [d for d in self.drones if d.role == "rescue"
+                    and d.state in ("IDLE", "STANDBY", "RESCUE_TRANSIT", "ON_SURVIVOR")]
+        planned = {d.id: 0.0 for d in rescuers}       # s of planned rescues ahead of the next one
+        searchers = [d for d in self.drones if d.state == "SEARCH" and not d.agent and d.plan_cell is not None
+                     and d.relook is None and not d.confirming]
+        for s in conf:
+            wait, r = min(((self._eta(d, s.e, s.n) + planned[d.id], d) for d in rescuers),
+                          key=lambda x: x[0], default=(math.inf, None))
+            best = None
+            for d in searchers:
+                t = self._eta(d, s.e, s.n)
+                if math.isinf(t):
+                    continue
+                rep = self._replacement(d)
+                p = d.vehicle.tel.pos
+                # the search gap: until a replacement arrives, or until d is back (out, hold, back)
+                gap = self._eta(rep, p[0], p[1]) if rep is not None else 2 * t + cfg.rescue_hold
+                cost = t + self._search_loss(d, min(gap, 2 * t + cfg.rescue_hold))
+                if best is None or cost < best[0]:
+                    best = (cost, d, t)
+            if best is not None and best[0] + cfg.switch_margin_s < wait:
+                cost, d, t = best
+                searchers.remove(d)
+                self.log("switch", sid=s.id, drone=d.id, eta=round(t, 1), cost=round(cost, 1),
+                         wait=None if math.isinf(wait) else round(wait, 1))
+                self.assign(d, s, f"auto switch: {t:.0f} s vs {wait:.0f} s wait")
+                d.resume_search = True
+            elif r is not None and not math.isinf(wait):
+                planned[r.id] = wait + cfg.rescue_hold
+
     def _dispatch(self):
         conf = [s for s in self.survivors.values() if s.status == "confirmed"]
         if not conf:
@@ -905,14 +986,19 @@ class Orchestrator:
         if d.role == "search":
             self._replace(d)
 
-    def _replace(self, leaving: Drone):
+    def _replacement(self, leaving: Drone):
         if not self.options["auto_replace"] or not self.mission or self.mission.stopping:
-            return
+            return None
         for d in self.drones:
             if d is not leaving and d.role == "search" and d.state in ("STANDBY", "IDLE") and d.battery_s > 300:
-                self._set_task(d, self._search(d), "SEARCH", "replacement")
-                self.event(f"{d.name} launched to replace {leaving.name}")
-                return
+                return d
+        return None
+
+    def _replace(self, leaving: Drone):
+        d = self._replacement(leaving)
+        if d is not None:
+            self._set_task(d, self._search(d), "SEARCH", "replacement")
+            self.event(f"{d.name} launched to replace {leaving.name}")
 
     def _auto_stage(self):
         m = self.mission
@@ -1004,6 +1090,8 @@ class Orchestrator:
                     d.last_cell = cell
                     self._look(d, cell)
         if m and m.status == "running":
+            if self.options["auto_switch"] and not m.stopping:
+                self._auto_switch()
             if self.options["auto_dispatch"]:
                 self._dispatch()
             self._auto_stage()

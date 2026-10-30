@@ -102,7 +102,7 @@ The agent cannot fly a re-look, so its finds are confirmed at once.
     "score": 0.87, "views": 2, "has_snapshot": true,
     "assigned": 2 | null, "t_detected": 88.2, "t_confirmed": 97.0 | null, "t_reached": null
   }],
-  "options": {"auto_dispatch": true, "auto_replace": false, "auto_stage": false},
+  "options": {"auto_dispatch": true, "auto_replace": false, "auto_stage": false, "auto_switch": true},
   "truth": [[lon, lat], ...] | null
 }
 ```
@@ -194,7 +194,7 @@ Events are also written to the mission log, except "preparing the search policie
 | `dispatch` | `drone`, `survivor` | Manual rescue dispatch, overrides automatic dispatch |
 | `confirm` | `survivor` | Operator confirms a candidate |
 | `reject` | `survivor` | Operator rejects a candidate |
-| `set_options` | any of `auto_dispatch`, `auto_replace`, `auto_stage` | Updates options |
+| `set_options` | any of `auto_dispatch`, `auto_replace`, `auto_stage`, `auto_switch` | Updates options (section 4.3) |
 | `set_speed` | `speed` | Kinematic backend only: simulation speed factor |
 | `select` | `drone` or `survivor` | Points the video panels at a drone |
 | `camera` | `view: "follow"` with `drone`, `distance` (m), `yaw`, `pitch` (degrees), or `view: "drone"` with `drone`, `fov`, `pan`, `tilt` (degrees) | Zoom and angle of the 3D follow camera or of a drone camera. FloodUAV only; the server posts it to `<bridge>/camera` |
@@ -219,7 +219,7 @@ not know them ignores them, so an old orchestrator still runs an old UI.
   "mode": "rl_search",
   "n_search": 3,
   "expected_survivors": 3,
-  "options": {"auto_dispatch": true, "auto_replace": false, "auto_stage": false},
+  "options": {"auto_dispatch": true, "auto_replace": false, "auto_stage": false, "auto_switch": true},
   "scenario": "wilderness",
   "lkp_time_h": 6,
   "regions": [{"polygon": [[149.575, -33.425], [149.585, -33.425], [149.585, -33.415], [149.575, -33.415]], "weight": 0.3}]
@@ -239,6 +239,34 @@ With `drone`, the video panels that track the selection show that drone.
 With `survivor`, they show the nearest drone to it.
 
 The server answers an invalid command with an `event` of level `error`.
+
+### 4.3 Mission options
+
+| Option | Default | Effect |
+|---|---|---|
+| `auto_dispatch` | on | Sends a free rescue drone (landed or standing by) to each confirmed survivor, picking the pairs that give the shortest flight times |
+| `auto_replace` | off | Launches a standby search drone when a search drone leaves the search |
+| `auto_stage` | off | Moves standing-by rescue drones toward the center of the remaining belief every 30 s |
+| `auto_switch` | on | Lets a search drone switch to rescue when that is faster than waiting for a rescue drone (below). Never in `rl_unity` mode |
+
+**Switch to rescue.**
+The server checks every confirmed survivor without a drone on each tick (0.2 s), oldest first.
+It runs before `auto_dispatch`.
+
+1. Wait: the soonest time a rescue drone can be over the survivor.
+   A free drone needs its flight time, plus 10 s if it is landed.
+   A busy drone first finishes its current rescue (flight plus `rescue_hold`, 20 s).
+   Survivors that come earlier in the order and stay with a rescue drone add their time to that drone's queue.
+2. Switch cost: for each search drone, its flight time to the survivor plus the search delay it causes.
+   The delay is in survivor-seconds: the expected finds the drone would make while away (belief of its current segment x `pd` x cells per second), times the time away.
+   Time away is out, `rescue_hold`, and back, or less if `auto_replace` has a replacement that arrives sooner.
+3. The search drone with the lowest cost switches when the cost plus `switch_margin_s` (30 s) is still under the wait.
+   The margin keeps drones from switching for a small gain.
+
+A drone switches only if its battery covers the flight there, `rescue_hold`, the flight home, landing and the reserve.
+Drones flown by the Unity agent, and drones in the middle of a re-look, do not switch.
+A switched drone searches again after the rescue.
+The dispatch event reads `auto switch: <eta> s vs <wait> s wait`, and the mission log gets a `switch` row (`sid`, `drone`, `eta`, `cost`, `wait`).
 
 ## 5. Replay
 

@@ -183,6 +183,53 @@ def test_recall_and_replace():
     asyncio.run(main())
 
 
+def test_auto_switch_sends_near_search_drone():
+    async def main():
+        orch = make()
+        await orch.start()
+        orch.start_mission(polygon=square(), mode="lawnmower", n_search=2, expected_survivors=1)
+        d = orch.drones[0]
+        assert await run_until(orch, lambda: d.plan_cell is not None, 300)
+        p = d.vehicle.tel.pos
+        # the rescue drone is busy far away: waiting for it is slower than switching d
+        r = orch.drones[2]
+        r.state, r.target = "RESCUE_TRANSIT", np.array([-2000.0, -2000.0])
+        s = Survivor(orch._next_sid, float(p[0]) + 20.0, float(p[1]), 0.9, orch.t_mission(), status="confirmed")
+        orch._next_sid += 1
+        orch.survivors[s.id] = s
+        assert await run_until(orch, lambda: s.status != "confirmed", 10)
+        assert s.assigned == d.id and d.resume_search
+        r.state, r.target = "STANDBY", None
+        assert await run_until(orch, lambda: s.status == "reached", 300)
+        assert await run_until(orch, lambda: d.state == "SEARCH", 30)
+        await orch.shutdown()
+    asyncio.run(main())
+
+
+def test_auto_switch_waits_for_near_rescue_drone():
+    async def main():
+        orch = make()
+        await orch.start()
+        orch.start_mission(polygon=square(), mode="lawnmower", n_search=2, expected_survivors=1,
+                           options={"auto_dispatch": False})
+        assert await run_until(orch, lambda: orch.drones[0].plan_cell is not None, 300)
+        # next to the rescue drone's pad: no search drone switches
+        s = Survivor(orch._next_sid, 6.0, 5.0, 0.9, orch.t_mission(), status="confirmed")
+        orch._next_sid += 1
+        orch.survivors[s.id] = s
+        await run_until(orch, lambda: False, 5)
+        assert s.status == "confirmed"
+        orch.drones[2].state = "RETURNING"         # no rescue drone left: a search drone would switch now
+        orch.mission.mode = "rl_unity"             # but the Unity agent's mode has its own rules
+        orch._auto_switch()
+        assert s.status == "confirmed"
+        orch.mission.mode = "lawnmower"
+        orch._auto_switch()
+        assert s.status == "assigned"
+        await orch.shutdown()
+    asyncio.run(main())
+
+
 def test_lost_link_aborts_then_lands():
     async def main():
         orch = make()
