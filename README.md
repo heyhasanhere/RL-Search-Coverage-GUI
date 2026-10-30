@@ -27,7 +27,7 @@ sar/                     Python package
 sim/
   flooduav/              Unity bridge, build patch (C#), run.sh
 unity/SearchPickupDefault/  FloodUAV Linux build, downloaded by scripts/get_unity.sh (not in git)
-unity/FloodUAV.app/         FloodUAV macOS build (not in git, docs/SETUP.md section 7)
+unity/FloodUAV.app/         FloodUAV macOS build, downloaded by scripts/get_unity.sh (not in git)
 models/
   ft_flood/seed1/        RL search policy fine-tuned on flood towns (default `rl` mode)
   ft_best/seed1/         previous RL search policy (`--ckpt models/ft_best/seed1`)
@@ -65,13 +65,13 @@ A mission started before that waits for it. `--no-warm` skips the startup compil
 FloodUAV on the Linux GPU machine or a Mac (UI on port 8001):
 
 ```bash
-scripts/get_unity.sh       # Linux, once: downloads the Unity build (512 MB) into unity/
+scripts/get_unity.sh       # once: downloads the Unity build for this OS (about 500 MB) into unity/
 sim/flooduav/run.sh up
 sim/flooduav/run.sh down
 ```
 
 Open `http://<host>:8001`.
-On a Mac, skip `get_unity.sh`: put the macOS build at `unity/FloodUAV.app` (`docs/SETUP.md` section 7) and open http://localhost:8001.
+On a Mac, open http://localhost:8001 (`docs/SETUP.md` section 7).
 
 ## Docs
 

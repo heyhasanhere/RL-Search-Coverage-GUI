@@ -41,13 +41,13 @@ For UI work, `npm run dev` in `ui/` runs Vite against a running server.
 
 ## 3. FloodUAV Unity Build
 
-The Unity build is too large for git, so it is attached to the GitHub Release `unity-v1` as `FloodUAV-linux.tar.gz` (512 MB).
+The Unity build is too large for git, so it is attached to the GitHub Release `unity-v1`: `FloodUAV-linux.tar.gz` (500 MB) and `FloodUAV-macos.tar.gz` (480 MB).
 
 ```bash
 scripts/get_unity.sh
 ```
 
-The script downloads the archive, checks its SHA-256 and unpacks it into `unity/SearchPickupDefault`.
+The script downloads the archive for this OS, checks its SHA-256 and unpacks it into `unity/SearchPickupDefault` (Linux) or `unity/FloodUAV.app` (macOS).
 It reads the repository from `git remote get-url origin`; set `UNITY_REPO=<owner>/<name>` or `UNITY_TAG` to override.
 `sim/flooduav/run.sh up` then builds the patched copy `unity/SearchPickupPatched` on first use.
 
@@ -84,7 +84,6 @@ Ports: UI 8001, bridge 8101.
 FloodUAV also runs on a Mac with Apple silicon, from a macOS build of the same Unity project.
 Unity renders with Metal, the patch renders the views offscreen and the bridge encodes them with VideoToolbox, so no X server or screen capture is needed.
 The mission server runs JAX on the CPU.
-The macOS build is not in the GitHub Release; build it from the Unity project.
 
 1. Install Homebrew, `uv` and Node.js. Create both venvs (section 1, without `--extra cuda`) and build the UI (section 2).
 2. Install the tools:
@@ -94,7 +93,8 @@ The macOS build is not in the GitHub Release; build it from the Unity project.
    curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0 --install-dir ~/.dotnet
    ```
 
-3. Build the player in Unity (File > Build Profiles > macOS, Apple silicon, Mono scripting backend) and save it as `unity/FloodUAV.app`.
+3. Get the macOS build: `scripts/get_unity.sh` (section 3) unpacks it into `unity/FloodUAV.app`.
+   To use your own build instead, build the player in Unity (File > Build Profiles > macOS, Apple silicon, Mono scripting backend) and save it there.
    The patch needs Mono: IL2CPP builds have no `Managed/Assembly-CSharp.dll`.
 4. Start and stop as on Linux:
 
