@@ -192,6 +192,20 @@ export function SettingsMenu({ config, state, ms, send, readOnly, showTruth, onS
           onChange={(e) => onShowTruth(e.target.checked)} />
         Show survivor truth on the map
       </label>
+      {state?.graphics && (
+        <label className="field" title="Render quality, anti-aliasing and video frame rate of the 3D views; Auto picks from this machine">
+          Graphics
+          <select value={state.graphics.preset} disabled={readOnly}
+            onChange={(e) => send({ type: "set_graphics", preset: e.target.value })}>
+            {state.graphics.presets.map((p) => (
+              <option key={p} value={p}>{p === "auto" ? `Auto (${state.graphics!.auto})` : p[0].toUpperCase() + p.slice(1)}</option>
+            ))}
+          </select>
+          <span className="hint">
+            {Math.round(state.graphics.scale * 100)}% resolution, {state.graphics.msaa > 1 ? `${state.graphics.msaa}x anti-aliasing` : "no anti-aliasing"}, {state.graphics.fps} fps, {state.graphics.bitrate}bit/s
+          </span>
+        </label>
+      )}
       {config?.backend === "kinematic" && (
         <label className="field">
           Sim speed {(state?.speed ?? speed).toFixed(1)}x

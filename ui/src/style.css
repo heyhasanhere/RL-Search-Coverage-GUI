@@ -230,6 +230,7 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 .settings-group { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
 .settings-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
 .settings-menu label.field, .settings-menu .mix-fields label { flex-direction: column; align-items: stretch; gap: 2px; color: var(--muted); }
+.settings-menu .hint { font-size: 11px; color: var(--muted); }
 .settings-menu .mix-fields label { justify-content: flex-end; }
 .settings-menu .row { margin-top: 0; align-items: flex-end; }
 .settings-menu .row .field { flex: 1; }

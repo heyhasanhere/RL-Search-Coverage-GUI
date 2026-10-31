@@ -114,6 +114,23 @@ export interface StateMsg {
   agent_limits?: "training" | "bridge";
   /** rl_unity: id of the trained agent that flies. */
   agent?: string | null;
+  /** FloodUAV graphics preset and what it sets; null: the backend has none. */
+  graphics?: Graphics | null;
+}
+
+export interface Graphics {
+  /** "auto", "low", "medium" or "high". */
+  preset: string;
+  /** The preset auto stands for on this machine. */
+  auto: string;
+  /** Share of the view size Unity renders, then scales up. */
+  scale: number;
+  /** Anti-aliasing samples (1: off). */
+  msaa: number;
+  fps: number;
+  /** H.264 bit rate per video pane, as ffmpeg takes it ("6M"). */
+  bitrate: string;
+  presets: string[];
 }
 
 export interface BeliefMsg {
@@ -323,6 +340,7 @@ export type ClientMsg =
   | { type: "recharge"; drone: number }
   /** Horizontal speed cap for all drones, m/s. */
   | { type: "set_drone_speed"; speed: number }
+  | { type: "set_graphics"; preset: string }
   | { type: "set_mode"; mode: string }
   /** rl_unity: the agent flies with its training flight limits, or with the operator's speed cap. */
   | { type: "set_agent_limits"; limits: "training" | "bridge" }
