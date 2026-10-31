@@ -11,10 +11,9 @@ sim/flooduav/patch/*/bin/
 sim/flooduav/patch/*/obj/
 
 # internal notes and tool caches, not published
-docs/STATUS.md
-docs/README-Internal.md
 CLAUDE.md
 .claude/
 graphify-out/
 .pytest_cache/
 .ruff_cache/
+docs/internal/
