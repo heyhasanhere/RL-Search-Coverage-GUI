@@ -17,6 +17,9 @@
 //   FLOODUAV_MAP       path the high resolution top-down map is written to (JPEG, Fleet message 5)
 //   FLOODUAV_SURVIVOR_SEED  survivor layout seed (Layout.cs; default -1: the build's fixed survivors)
 //   FLOODUAV_SURVIVOR_COUNT number of survivors (Layout.cs; default -1: the build's 15)
+//   FLOODUAV_MAX_DT    game time one frame may advance, s (default 0.05). Unity waits for the bridge inside a
+//                      frame, and that wait counts as frame time, so without a small cap one frame runs
+//                      several bridge steps and their waits, and the frame rate falls to a few fps.
 
 using System;
 using System.Collections;
@@ -120,6 +123,7 @@ namespace FloodPatch
         public static void Mission(MonoBehaviour mission)
         {
             Application.runInBackground = true;
+            Time.maximumDeltaTime = Mathf.Max(Env("FLOODUAV_MAX_DT", 0.05f), Time.fixedDeltaTime);
             Set(mission, "timeLimitSeconds", "FLOODUAV_TIME_LIMIT");
             try
             {

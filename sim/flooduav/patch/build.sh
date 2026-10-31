@@ -34,6 +34,8 @@ fi
 rm "$OUT/Assembly-CSharp.dll"
 dotnet out/injector/Injector.dll "$M/Assembly-CSharp.dll" out/hook/FloodPatch.dll "$OUT/Assembly-CSharp.dll"
 cp out/hook/FloodPatch.dll "$OUT/"
+# macOS slows a hidden app down (App Nap), and with it the video
+[ "$(uname)" = Darwin ] && /usr/libexec/PlistBuddy -c "Add :LSAppNapIsDisabled bool true" "$DST/Contents/Info.plist"
 # the changed bundle needs a new (ad hoc) signature, or macOS refuses to start it
 [ "$(uname)" = Darwin ] && codesign --force --deep --sign - "$DST" >/dev/null 2>&1
 echo "patched build: $DST"
