@@ -111,6 +111,9 @@ The agent cannot fly a re-look, so its finds are confirmed at once.
 
 `truth` is the simulated ground truth; it is sent only when the server runs with `--show-truth`.
 
+`graphics` (FloodUAV only, else null) is the video quality: `{"preset", "auto", "scale", "msaa", "fps", "bitrate", "presets"}`.
+`preset` is `auto` or one of `presets`; `auto` names the preset that Auto picked for this machine; `scale`, `msaa`, `fps` and `bitrate` are the values in use.
+
 The extra drone fields are optional and older clients ignore them.
 
 | Field | Meaning |
@@ -202,6 +205,7 @@ Events are also written to the mission log, except "preparing the search policie
 | `reject` | `survivor` | Operator rejects a candidate |
 | `set_options` | any of `auto_dispatch`, `auto_replace`, `auto_stage`, `auto_switch`, `relook` | Updates options (section 4.3) |
 | `set_speed` | `speed` | Kinematic backend only: simulation speed factor |
+| `set_graphics` | `preset` (`auto`, `low`, `medium` or `high`) | FloodUAV only: video quality, also mid-mission. The server posts it to `<bridge>/graphics`; the state message reports it as `graphics` |
 | `select` | `drone` or `survivor` | Points the video panels at a drone |
 | `camera` | `view: "follow"` with `drone`, `distance` (m), `yaw`, `pitch` (degrees), or `view: "drone"` with `drone`, `fov`, `pan`, `tilt` (degrees) | Zoom and angle of the 3D follow camera or of a drone camera. FloodUAV only; the server posts it to `<bridge>/camera` |
 

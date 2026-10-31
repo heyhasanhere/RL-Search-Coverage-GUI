@@ -57,6 +57,7 @@ Without it they show a placeholder.
 - Drone speed: the cap starts at 15 m/s, or 3 m/s in `rl_unity`. Changing the mode before Start resets it to that mode's default.
   In `rl_unity` it applies to the agent too.
 - Simulation settings (`Settings`, top bar): show or hide the true survivor positions on the map, the sim speed (kinematic), and `Survivors in map` with `New survivors` (FloodUAV).
+  `Graphics` (FloodUAV) sets the video quality: Auto (the preset picked for this machine), Low, Medium or High. The line under it shows the resolution, anti-aliasing, frames a second and bit rate in use.
 
 ## Screenshots
 

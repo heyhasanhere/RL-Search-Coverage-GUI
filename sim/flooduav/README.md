@@ -44,11 +44,28 @@ The patch reads environment variables at mission start:
 Linux: Unity renders with Vulkan on the NVIDIA GPU (`-force-vulkan`); OpenGL under Xvfb falls back to llvmpipe at about 3 fps.
 The mission server runs JAX on GPU 1 (`FLOODUAV_GPU`) without preallocation, so GPU 0 stays free for Unity.
 
-macOS: Unity renders with Metal in a small window (784x200) that shows a preview; the views go to the frame file (`--frames`, default `/tmp/flooduav_frames.raw`) at `--fps`.
+macOS: Unity renders with Metal in a small window (784x200) that shows a preview; the views go to the frame file (`--frames`, default `/tmp/flooduav_frames.raw`).
+Unity draws up to 60 frames a second, and up to 3 GPU readbacks run at once, so the capture keeps up with the preset's frame rate.
+`--capture-scale 0.5` renders the views at half size (1960x360); it lowers the GPU copy and encoding work, not Unity's CPU use.
+A frame covers at most 0.05 s of game time (`FLOODUAV_MAX_DT`). Unity counts its wait for the bridge as frame time, and without the cap a frame ran many physics steps, so the video fell to 2-3 fps.
+The patched app has App Nap off (`LSAppNapIsDisabled`), so macOS does not slow it down while it is hidden.
 The window must stay open: Unity draws only with a window, so it cannot run headless (`-nographics` turns off the video and the map).
 Do not quit it with Cmd+Q or the Dock: the player can hang while quitting. If Unity stops, the bridge exits too; restart with `down`, then `up`. On macOS `down` force-kills a player that does not quit.
 The frame file is a 32-byte header (frame number, width, height, slot) and two RGBA slots, bottom row first (`Capture.cs`).
 The mission server runs JAX on the CPU.
+
+Graphics presets (`--graphics`, default `auto`; the UI changes it under Settings > Simulation):
+
+| Preset | Render scale | Anti-aliasing | Video fps | H.264 bit rate |
+|---|---|---|---|---|
+| low | 0.75 | off | 10 | 2 Mbit/s |
+| medium | 1.0 | 2x | 20 | 4 Mbit/s |
+| high | 1.0 | 4x | 30 | 6 Mbit/s |
+
+`auto` picks `high` on an Apple Silicon Mac or on Linux with an NVIDIA GPU (`nvidia-smi`), else `medium`.
+`GET /graphics` returns the preset, the Auto choice and the values in use; `POST /graphics` with `{"preset": ...}` switches it while running.
+The bridge sends the render scale and anti-aliasing to Unity over the side channel, and `unity.log` names them.
+On a switch the video encoders restart, and viewers wait for the next key frame.
 
 ## Behavior and limits
 
@@ -70,7 +87,7 @@ The mission server runs JAX on the CPU.
 - Two drones under our control, 15 survivors by default (1-100, see Survivor positions). Both drones use the same detection box.
 - Restart (`POST /reset`) puts both drones back on their pads and clears Unity's finds. It keeps the survivor positions. Speed cap: `POST /speed`.
 - Camera zoom and angle: `POST /camera` with `{"view": "follow", "drone", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
-- Video: `GET /stream/<region>` is MJPEG (`?small=1`: 640 px wide, 6 frames a second). `GET /h264/<region>` is H.264 from the GPU encoder (NVENC on Linux, VideoToolbox on macOS, libx264 if that fails), 2 Mbit/s with a key frame every second. Each H.264 encoder runs only while someone watches it.
+- Video: `GET /stream/<region>` is MJPEG (`?small=1`: 640 px wide, 6 frames a second). `GET /h264/<region>` is H.264 from the GPU encoder (NVENC on Linux, VideoToolbox on macOS, libx264 if that fails), at the graphics preset's bit rate with a key frame every second. Each H.264 encoder runs only while someone watches it.
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
 - The build's mission map (`MissionMapDisplay`) goes to a second display, which Xvfb does not have. With offscreen capture (macOS) the patch turns it off, or it would open as a full-screen window in its own desktop space.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.
