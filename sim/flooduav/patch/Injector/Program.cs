@@ -26,6 +26,21 @@ void Prefix(string type, string method, string hook)
     Console.WriteLine($"patched {type}.{method} -> Hook.{hook}");
 }
 
+// Like Prefix, but the method returns right away when the hook returns true.
+void Skip(string type, string method, string hook)
+{
+    var m = mod.GetType(type).Methods.Single(x => x.Name == method && !x.HasParameters);
+    var call = mod.ImportReference(hooks.Methods.Single(x => x.Name == hook));
+    var il = m.Body.GetILProcessor();
+    var first = m.Body.Instructions[0];
+    il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+    il.InsertBefore(first, il.Create(OpCodes.Call, call));
+    il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
+    il.InsertBefore(first, il.Create(OpCodes.Ret));
+    Console.WriteLine($"patched {type}.{method} -> Hook.{hook} (skip)");
+}
+
 Prefix("MBaske.DroneVelocityController", "OnEnable", "Drone");
 Prefix("MBaske.SearchMissionManager", "BeginMission", "Mission");
+Skip("MBaske.MissionMapDisplay", "Start", "MapDisplay");
 asm.Write(dst);

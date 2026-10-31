@@ -82,15 +82,6 @@ namespace FloodPatch
 
         public static void Drone(MonoBehaviour controller)
         {
-            // With offscreen capture, MissionMapDisplay would open the mission map as a full-screen
-            // second window (macOS); drone OnEnable runs before its Start, so disable it here.
-            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FLOODUAV_CAPTURE")))
-            {
-                Type map = controller.GetType().Assembly.GetType("MBaske.MissionMapDisplay") ?? controller.GetType().Assembly.GetType("MissionMapDisplay");
-                if (map != null)
-                    foreach (UnityEngine.Object o in UnityEngine.Object.FindObjectsOfType(map))
-                        ((Behaviour)o).enabled = false;
-            }
             Component wing = controller.GetComponent("CargoAircraftController");
             if (!BuildLimits.ContainsKey(controller))
                 BuildLimits[controller] = new[] {
@@ -118,6 +109,15 @@ namespace FloodPatch
             foreach (string name in new[] { "mass", "wingArea", "maximumThrust", "parasiticDrag", "inducedDrag", "sideDrag", "liftAtZeroAngle" })
                 sb.Append(' ').Append(name).Append('=').Append(((float)Get(aircraft, name)).ToString(CultureInfo.InvariantCulture));
             Debug.Log(sb.ToString());
+        }
+
+        // MissionMapDisplay.Start activates a second display when one exists, which opens a
+        // full-screen window on macOS. Skip it, so the monitor setup does not matter.
+        public static bool MapDisplay(MonoBehaviour display)
+        {
+            display.enabled = false;
+            Debug.Log("[FloodPatch] mission map display off");
+            return true;
         }
 
         public static void Mission(MonoBehaviour mission)

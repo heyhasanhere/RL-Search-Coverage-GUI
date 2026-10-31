@@ -89,7 +89,7 @@ On a switch the video encoders restart, and viewers wait for the next key frame.
 - Camera zoom and angle: `POST /camera` with `{"view": "follow", "drone", "distance", "yaw", "pitch"}` or `{"view": "drone", "drone", "fov", "pan", "tilt"}`.
 - Video: `GET /stream/<region>` is MJPEG (`?small=1`: 640 px wide, 6 frames a second). `GET /h264/<region>` is H.264 from the GPU encoder (NVENC on Linux, VideoToolbox on macOS, libx264 if that fails), at the graphics preset's bit rate with a key frame every second. Each H.264 encoder runs only while someone watches it.
 - Map image: `GET /map.jpg` renders the top-down overview camera once at `--map-px` (default 4096) and caches it.
-- The build's mission map (`MissionMapDisplay`) goes to a second display, which Xvfb does not have. With offscreen capture (macOS) the patch turns it off, or it would open as a full-screen window in its own desktop space.
+- The build's mission map (`MissionMapDisplay`) would open on a second display (on macOS a full-screen window in its own desktop space). The patch always turns it off; the UI has its own map.
 - Speed: `--rate 2` (sim seconds per wall second) with Unity time scale 2. A time scale above the rate drops the video to a few fps.
 - Trained agent (`rl_unity` mode): `POST /pilot` with `{"pilot": "onnx"}` lets the build's agent fly D1 on Unity's 936-value observation.
   `"agent": <id>` picks another agent; `GET /agents` lists them (`agents`, with a label such as "DQN 5M").
