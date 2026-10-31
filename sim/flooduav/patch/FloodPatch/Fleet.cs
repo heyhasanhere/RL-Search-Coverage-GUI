@@ -10,6 +10,7 @@
 //   [5, size]                               write a size x size top-down map to FLOODUAV_MAP
 //   [6, seed, count]                        survivor layout for the next mission start (Layout.cs; -1: the build's)
 //   [7, hspeed, vspeed, tilt, wing area]    search drone flight limits (m/s, m/s, deg, m2); below 0: the build's value
+//   [8, render scale, msaa, fps]            graphics preset (Graphics.cs)
 // Unity to bridge, every decision step (5 physics steps):
 //   [pos x, y, z normalized in the boundary, velocity x, y, z in the boundary frame (m/s),
 //    heading sin, cos (from boundary forward, clockwise), nearest of 8 horizontal rays / 30 m,
@@ -129,6 +130,8 @@ namespace FloodPatch
                            v.Count >= 8 ? new[] { v[3], v[4], v[5], v[6], v[7] } : null);
             else if (kind == 7 && v.Count >= 5)
                 SearchLimits(v);
+            else if (kind == 8 && v.Count >= 4)
+                Graphics.Apply(v[1], Mathf.RoundToInt(v[2]), v[3]);
         }
 
         // DroneVelocityController reads its limits every step; only the tilt is also copied to the aircraft in OnEnable.
