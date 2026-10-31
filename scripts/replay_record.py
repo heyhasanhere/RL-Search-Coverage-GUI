@@ -8,7 +8,7 @@ time i / fps and mission time `sim`; scripts/replay_pack.py turns these points
 into the replay timeline. Runs until SIGINT or SIGTERM, then closes the videos.
 
   .venv/bin/python scripts/replay_record.py --out runs/demo/rec_1700 \\
-      --views follow,overview,cam0,cam1
+      --views follow,follow1,overview,cam0,cam1
 Writes <out>/<view>.mp4 and <out>/timeline_raw.json. Needs httpx and ffmpeg.
 """
 
@@ -54,6 +54,8 @@ class Clock:
 def stream_url(server: str, view: str) -> str:
     if view.startswith("cam"):
         return f"{server}/video/camera/{int(view[3:])}.mjpg?full=1"
+    if view.startswith("follow") and view[6:]:
+        return f"{server}/video/follow/{int(view[6:])}.mjpg?full=1"
     return f"{server}/video/{view}.mjpg?full=1"
 
 
@@ -105,7 +107,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--server", default="http://127.0.0.1:8001")
     ap.add_argument("--clock-server", default="", help="server for /api/clock (default --server)")
-    ap.add_argument("--views", default="follow,overview,cam0,cam1")
+    ap.add_argument("--views", default="follow,follow1,overview,cam0,cam1")
     ap.add_argument("--out", required=True)
     ap.add_argument("--fps", type=int, default=10, help="output frame rate (video time = frame / fps)")
     args = ap.parse_args()

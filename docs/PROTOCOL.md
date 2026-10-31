@@ -13,6 +13,7 @@ Coordinates are always `[lon, lat]` (GeoJSON order). Times are seconds of missio
 | Metrics | `GET /api/metrics` |
 | Replay list | `GET /api/replays` |
 | Replay detail | `GET /api/replay/<id>` |
+| Record the mission | `GET /api/record`, `POST /api/record/start`, `POST /api/record/stop` |
 | 3D follow camera | `GET /video/follow/<drone>.mjpg` (`/video/follow.mjpg`: drone 0) |
 | 3D overview camera | `GET /video/overview.mjpg` |
 | Drone camera with detector boxes | `GET /video/camera/<drone>.mjpg` |
@@ -326,6 +327,8 @@ The list of missions that can be replayed.
 | `expected` | Expected survivors the mission was given. |
 | `n_frames` | Number of track frames in the log. |
 | `n_finds` | Number of survivor detections in the log. |
+| `n_videos` | Number of recorded 3D views (packed recordings only). |
+| `recording` | The folder name of a packed recording (`runs/replays/<name>`), or `null` for a plain mission log. |
 
 Missions with nothing to show (no tracks, finds or belief) are left out.
 
@@ -364,3 +367,19 @@ One mission as a time series the UI can scrub.
 | `curve` | The found-expected curve as `[[t, value], ...]`. This is the line the UI draws in the replay chart. |
 
 The server answers an unknown id with a 404 and `{"error": "no replay <id>"}`.
+
+### 5.3 Recording a mission
+
+The `Record` button records the running mission into `runs/replays/<name>/`.
+With a sim bridge it records every 3D view: the follow view of each drone (`follow`, `follow1`),
+the overview and each drone camera (`cam0`, `cam1`). Without a bridge the recording holds the mission log only.
+Stopping packs the latest mission of the server log with its videos.
+`start` and `stop` need the operator login when the server has a password.
+
+| Request | Answer |
+|---|---|
+| `GET /api/record` | `{"state": "idle\|recording\|packing", "name", "videos", "elapsed", "last", "error"}` |
+| `POST /api/record/start` | Body `{"name": "..."}` (optional; default `rec_<date>_<time>`). 409 if already recording. |
+| `POST /api/record/stop` | Stops and packs in the background; `last` holds the new name when done. 409 if not recording. |
+
+The recorder needs `ffmpeg` on the server machine.

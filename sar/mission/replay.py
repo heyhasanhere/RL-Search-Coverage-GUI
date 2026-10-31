@@ -453,7 +453,14 @@ def _row(m: dict) -> dict:
         "seed": m["seed"], "started": m["started"], "duration": m["duration"],
         "grid": m["grid"], "expected": m["expected"], "n_frames": m["n_frames"],
         "n_finds": m["n_finds"], "n_videos": m.get("n_videos", 0),
+        # the folder name of a packed replay (runs/replays/<name>), None for a plain log
+        "recording": _recording_name(m["path"]),
     }
+
+
+def _recording_name(path: str) -> str | None:
+    p = Path(path)
+    return p.parent.name if p.parent.parent.name == REPLAY_DIR else None
 
 
 def get_replay(replay_id: str, root: Path | None = None) -> dict | None:

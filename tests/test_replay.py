@@ -264,3 +264,33 @@ def test_survivor_history_from_finds_and_events():
     assert (s0["t_detected"], s0["t_rejected"], s0["score"]) == (5.0, 5.2, 0.4)
     assert (s1["t_confirmed"], s1["t_assigned"], s1["t_reached"], s1["assigned"]) == (9.5, 9.7, 30.0, 3)
     assert s1["true"] is True
+
+
+# ------------------------------------------------------------------ recording
+def test_record_saves_a_replay(tmp_path, monkeypatch):
+    """The record button (no sim bridge): the latest mission of the log becomes runs/replays/<name>."""
+    import time
+    import sar.mission.server as server_mod
+    monkeypatch.setattr(replay, "ROOT", tmp_path)
+    monkeypatch.setattr(server_mod, "ROOT", tmp_path)
+    log = tmp_path / "runs" / "mission" / "mission.jsonl"
+    log.parent.mkdir(parents=True)
+    synthetic_log(log, mode="greedy", seed=3)
+    args = parser().parse_args(["--backend", "kinematic", "--speed", "1", "--log", str(log), "--no-warm"])
+    orch = build(args)
+    with TestClient(make_app(args, orch)) as c:
+        assert c.get("/api/record").json()["state"] == "idle"
+        assert c.post("/api/record/stop").status_code == 409
+        r = c.post("/api/record/start", json={"name": "my run!"})
+        assert r.status_code == 200 and r.json()["state"] == "recording"
+        assert c.post("/api/record/start", json={}).status_code == 409
+        assert c.post("/api/record/stop").json()["state"] == "packing"
+        for _ in range(100):
+            st = c.get("/api/record").json()
+            if st["state"] == "idle":
+                break
+            time.sleep(0.1)
+        assert st["error"] == "" and st["last"] == "my_run"
+        rows = [r for r in c.get("/api/replays").json()["replays"] if r["recording"] == "my_run"]
+        assert len(rows) == 1 and rows[0]["mode"] == "greedy"
+        assert (tmp_path / "runs" / "replays" / "my_run" / "mission.jsonl").is_file()

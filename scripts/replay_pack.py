@@ -89,13 +89,15 @@ def main():
     ap.add_argument("--name", required=True, help="replay folder name under runs/replays")
     ap.add_argument("--mission", type=int, default=-1, help="which mission in the log (default the last)")
     ap.add_argument("--width", type=int, default=1280, help="maximum video width")
+    ap.add_argument("--root", default=str(ROOT), help="project folder that holds runs/replays")
     args = ap.parse_args()
 
     rows = pick_mission(read_rows(Path(args.log)), args.mission)
     tracks = [r["t"] for r in rows if r.get("kind") == "track"]
     if not tracks:
         raise SystemExit("no track rows in that mission")
-    out = ROOT / "runs" / "replays" / args.name
+    root = Path(args.root)
+    out = root / "runs" / "replays" / args.name
     out.mkdir(parents=True, exist_ok=True)
     (out / "mission.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
 
@@ -122,7 +124,7 @@ def main():
               f"{' (approximate)' if approx else ''}")
 
     (out / "timeline.json").write_text(json.dumps({"videos": videos}, indent=1))
-    print(f"wrote {out.relative_to(ROOT)}")
+    print(f"wrote {out.relative_to(root)}")
 
 
 if __name__ == "__main__":

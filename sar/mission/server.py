@@ -27,6 +27,7 @@ from sar.config import MissionConfig
 from sar.mission.detect import SimDetector
 from sar.mission.orchestrator import Orchestrator
 from sar.mission import replay
+from sar.mission.recorder import Recorder
 from sar.mission.scenario import sample_survivors
 from sar.mission.vehicle import BridgeClock, KinematicVehicle, SimClock
 from sar.mission.video import frames, frames_with_boxes, passthrough, stream_headers
@@ -178,6 +179,15 @@ COOKIE = "sar_control"
 def make_app(args, orch: Orchestrator) -> FastAPI:
     cfg = orch.cfg
     bridge = (getattr(args, "bridge", "") or "").rstrip("/")
+    # The record button records this server's own video streams.
+    host = getattr(args, "host", "0.0.0.0")
+    host = "127.0.0.1" if host in ("0.0.0.0", "::", "localhost", "") else host
+    views = []
+    if bridge:
+        ids = [d.id for d in orch.drones]
+        views = ["follow"] + [f"follow{i}" for i in ids if i] + ["overview"] + [f"cam{i}" for i in ids]
+    log = getattr(args, "log", "")
+    recorder = Recorder(ROOT, f"http://{host}:{getattr(args, 'port', 8000)}", Path(log) if log else None, views)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -185,6 +195,7 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         if orch.sensors is not None:
             orch.sensors.start()
         yield
+        await recorder.shutdown()
         await orch.shutdown()
 
     app = FastAPI(lifespan=lifespan)
@@ -283,6 +294,26 @@ def make_app(args, orch: Orchestrator) -> FastAPI:
         if data is None:
             return JSONResponse({"error": f"no replay {replay_id}"}, status_code=404)
         return data
+
+    # The record button: record the running mission into runs/replays/<name>.
+    @app.get("/api/record")
+    def record_status():
+        return recorder.status()
+
+    @app.post("/api/record/start")
+    async def record_start(request: Request):
+        if not is_operator(request.cookies):
+            return JSONResponse({"error": "operator login required"}, status_code=403)
+        body = await request.json() if await request.body() else {}
+        err = await recorder.start(str(body.get("name", "")))
+        return JSONResponse({"error": err}, status_code=409) if err else recorder.status()
+
+    @app.post("/api/record/stop")
+    async def record_stop(request: Request):
+        if not is_operator(request.cookies):
+            return JSONResponse({"error": "operator login required"}, status_code=403)
+        err = await recorder.stop()
+        return JSONResponse({"error": err}, status_code=409) if err else recorder.status()
 
     # Recorded videos of packed replays (scripts/replay_pack.py). FileResponse
     # answers Range requests, so the browser can seek.
