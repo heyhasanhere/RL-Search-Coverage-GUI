@@ -506,7 +506,7 @@ class Orchestrator:
 
     def _check_v2_mode(self, mode):
         if mode in MODES_V2 and not get_policy_v2(32).available(mode):
-            raise ValueError(f"mode {mode} needs the M4 checkpoint (models/v2_m4/final)")
+            raise ValueError(f"mode {mode} needs the expert-iteration checkpoint (models/expert_iteration/final)")
 
     def _heading_of(self, a):
         if self.mission.mode in MODES_V2:

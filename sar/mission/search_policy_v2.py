@@ -38,7 +38,7 @@ from sar.env.v2.grid_env_v2 import ACTIVE, AIRBORNE, LEFT, EnvStateV2, SearchEnv
 
 MODES_V2 = ("mcts", "rl_search")
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CKPT_V2 = ROOT / "models/v2_m4/final"
+DEFAULT_CKPT_V2 = ROOT / "models/expert_iteration/final"
 
 _CACHE: dict = {}
 

@@ -2,7 +2,7 @@
 
 Uses a small untrained checkpoint written to a temp dir, so the tests do not
 depend on a training run. The timing test uses the real checkpoint at grid 128
-when `models/v2_m4/final` exists and is skipped otherwise.
+when `models/expert_iteration/final` exists and is skipped otherwise.
 """
 
 import time
@@ -17,7 +17,7 @@ from sar.config_v2 import TrainConfigV2
 from sar.search import mcts, v2_service
 from sar.train import expert_v2, networks_v2 as NN
 
-FINAL = Path("models/v2_m4/final")
+FINAL = Path("models/expert_iteration/final")
 
 
 @pytest.fixture(scope="module")

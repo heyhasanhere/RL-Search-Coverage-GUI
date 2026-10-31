@@ -29,9 +29,9 @@ sim/
 unity/SearchPickupDefault/  FloodUAV Linux build, downloaded by scripts/get_unity.sh (not in git)
 unity/FloodUAV.app/         FloodUAV macOS build, downloaded by scripts/get_unity.sh (not in git)
 models/
-  ft_flood/seed1/        RL search policy fine-tuned on flood towns (default `rl` mode)
-  ft_best/seed1/         previous RL search policy (`--ckpt models/ft_best/seed1`)
-  v2_m4/final/           v2 policy for the altitude and tree-search modes
+  mappo_flood/seed1/     RL search policy fine-tuned on flood towns (default `rl` mode)
+  mappo_general/seed1/   previous RL search policy (`--ckpt models/mappo_general/seed1`)
+  expert_iteration/final/ v2 policy for the altitude and tree-search modes
   unity_survivor_search/ FloodUAV's own trained agent (`rl_unity` mode)
   RL_PPO-TRPO-DQN/       more `rl_unity` agents: PPO checkpoints, DQN and TRPO
 data/

@@ -1,6 +1,6 @@
 """Inference API for the orchestrator: learned search policies on env v2.
 
-    policy = load_policy("models/v2_m4/final")          # CPU by default
+    policy = load_policy("models/expert_iteration/final")          # CPU by default
     actions = policy.act(policy.observe(state))            # 'rl_search', no search
     actions = policy.plan(state)                           # 'mcts', network-guided
     a_i = policy.plan(state, drone=i)                      # one drone's decision
@@ -29,7 +29,7 @@ from sar.config_v2 import TrainConfigV2
 from sar.search import mcts, policies_v2 as P
 from sar.train import networks_v2 as NN
 
-DEFAULT_CKPT = Path("models/v2_m4/final")
+DEFAULT_CKPT = Path("models/expert_iteration/final")
 
 
 class SearchPolicyV2:

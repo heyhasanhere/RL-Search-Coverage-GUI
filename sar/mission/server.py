@@ -398,7 +398,7 @@ def parser():
     ap.add_argument("--backend", choices=["kinematic", "flooduav"], default="kinematic")
     ap.add_argument("--roles", default="search,search,rescue")
     ap.add_argument("--speed", type=float, default=1.0, help="sim speed factor (kinematic)")
-    ap.add_argument("--ckpt", default=str(ROOT / "models/ft_flood/seed1"))
+    ap.add_argument("--ckpt", default=str(ROOT / "models/mappo_flood/seed1"))
     ap.add_argument("--detector", choices=["sim"], default="sim")
     ap.add_argument("--pd", type=float, default=0.8)
     ap.add_argument("--fp", type=float, default=0.01)
