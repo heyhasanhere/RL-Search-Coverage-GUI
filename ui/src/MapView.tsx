@@ -52,6 +52,12 @@ interface Props {
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
+/** Remove an image layer and its source of the same id, when they exist. */
+function removeImage(map: maplibregl.Map, id: string) {
+  if (map.getLayer(id)) map.removeLayer(id);
+  if (map.getSource(id)) map.removeSource(id);
+}
+
 function fc(features: GeoJSON.Feature[]): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features };
 }
@@ -311,7 +317,12 @@ export default function MapView(props: Props) {
   // Belief and coverage image sources.
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || !belief) return;
+    if (!ready || !map) return;
+    // No belief (a replay with no mission picked): clear the last one.
+    if (!belief) {
+      for (const id of ["belief", "coverage"]) removeImage(map, id);
+      return;
+    }
     const imgs: [string, string, number][] = [
       ["belief", belief.png, 0.65],
       ["coverage", belief.coverage_png, 0.45],
@@ -341,7 +352,11 @@ export default function MapView(props: Props) {
   // Prior layers: one image source per component plus the blend (plan 6.2, PROTOCOL 5.3).
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || !prior) return;
+    if (!ready || !map) return;
+    if (!prior) {
+      for (const layer of map.getStyle().layers ?? []) if (layer.id.startsWith("prior-")) removeImage(map, layer.id);
+      return;
+    }
     const entries: [string, string, number][] = [
       ...prior.layers.map((l): [string, string, number] => [`prior-${l.key}`, l.png, 0.7]),
       ["prior-blend", prior.blend.png, 0.6],
