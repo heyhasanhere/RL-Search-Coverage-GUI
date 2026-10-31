@@ -32,8 +32,8 @@ models/
   mappo_flood/seed1/     RL search policy fine-tuned on flood towns (default `rl` mode)
   mappo_general/seed1/   previous RL search policy (`--ckpt models/mappo_general/seed1`)
   expert_iteration/final/ v2 policy for the altitude and tree-search modes
-  unity_survivor_search/ FloodUAV's own trained agent (`rl_unity` mode)
-  RL_PPO-TRPO-DQN/       more `rl_unity` agents: PPO checkpoints, DQN and TRPO
+  ppo_19m.onnx           FloodUAV's own trained agent (default `rl_unity` agent)
+  DQN/, TRPO/            more `rl_unity` agents (Stable-Baselines3 checkpoints)
 data/
   pd_table.json          detection probability table
   regions/demo_flood.npz flood town layers for the flood prior

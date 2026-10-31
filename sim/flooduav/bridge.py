@@ -943,7 +943,7 @@ def main():
     ap.add_argument("--map-px", type=int, default=4096, help="map render size, pixels per side")
     ap.add_argument("--models", default=str(ROOT / "models"),
                     help="drop-in folder of trained search agents (sim/flooduav/agents.py), flown with POST /pilot")
-    ap.add_argument("--agent", default="unity_survivor_search/survivor_search_ppo_19m",
+    ap.add_argument("--agent", default="ppo_19m",
                     help="the default agent: its path under --models, without .onnx")
     args = ap.parse_args()
 

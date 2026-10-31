@@ -28,7 +28,7 @@ With it set, anyone can watch and only a browser logged in with the password (st
 | Capture | `patch/FloodPatch/Capture.cs` | macOS: the split views render into a 3920x720 texture instead of the screen, and its frames go to a file the bridge reads (`--capture file`) |
 | Fleet | `patch/FloodPatch/Fleet.cs` | Takes over the build's pickup drone (pilot and coordinator off) and flies it from a side channel |
 | Bridge | `bridge.py` (`.venv-fly`) | Steps Unity, flies both drones to setpoints, lands them, streams the screen regions (or the captured frames) as MJPEG and H.264 |
-| Trained agent | `models/unity_survivor_search/survivor_search_ppo_19m.onnx` | The build's own search agent (ML-Agents PPO, `train_config.yaml`); the bridge can fly D1 with it |
+| Trained agent | `models/ppo_19m.onnx` | The build's own search agent (ML-Agents PPO); the bridge can fly D1 with it |
 | More agents | anywhere under `models/` | Drop-in: ML-Agents ONNX files and Stable-Baselines3 folders (DQN, TRPO) on the same observation, found automatically |
 | Backend | `sar/mission/flooduav.py`, `server.py --backend flooduav` | Two drones (D1 search drone, D2 pickup drone); survivors inside each drone's detection box become detections |
 
