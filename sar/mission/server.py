@@ -145,6 +145,15 @@ def build_flooduav(args, cfg: MissionConfig) -> Orchestrator:
     orch.truth_en = truth          # Unity's survivors are known from the start, so truth shows before a mission
     orch.on_restart = restart
     orch.on_new_survivors = new_survivors
+
+    async def set_graphics(preset):
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(f"{args.bridge_url}/graphics", json={"preset": preset})
+            r.raise_for_status()
+        return r.json()
+    orch.on_graphics = set_graphics
+    orch.graphics = info.get("graphics")
     from sar.prior.flood_bank import make_cells_builder
     orch.prior_builder = make_cells_builder(lambda: orch.flood_info)
     for v in vehicles:

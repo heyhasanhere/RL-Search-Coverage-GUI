@@ -133,6 +133,8 @@ class Orchestrator:
         self.on_restart = None                   # optional async callback: reset the sim world
         self.on_new_survivors = None             # optional async callback(count, mix): new survivor layout, returns (seed, count)
         self.drone_speed: float | None = None    # operator speed cap, m/s; None: vehicle default
+        self.on_graphics = None                  # optional async callback(preset): sim graphics preset, returns the bridge's graphics
+        self.graphics: dict | None = None        # the sim's graphics: preset, auto, scale, msaa, fps, bitrate, presets
         # AGENT_MODE flight limits: "bridge" (the operator's speed cap) or "training" (the agent's own, speed cap off)
         self.agent_limits = "bridge"
         # AGENT_MODE trained agents ({"id", "label"}) and the one that flies; set by the backend
@@ -410,6 +412,17 @@ class Orchestrator:
             raise ValueError(f"{d.name} must be landed to recharge")
         d.battery_s = self.cfg.battery_s
         self.event(f"{d.name} battery recharged")
+
+    async def set_graphics(self, preset: str):
+        if self.on_graphics is None:
+            raise ValueError("this backend has no graphics presets")
+        presets = (self.graphics or {}).get("presets", [])
+        if presets and preset not in presets:
+            raise ValueError(f"graphics preset: {', '.join(presets)}")
+        g = await self.on_graphics(preset)
+        self.graphics = {k: g[k] for k in ("preset", "auto", "scale", "msaa", "fps", "bitrate", "presets") if k in g}
+        shown = f"auto ({g['auto']})" if preset == "auto" else preset
+        self.event(f"graphics {shown}: {g['fps']} fps, {g['bitrate']}bit/s")
 
     async def set_drone_speed(self, v: float):
         v = float(v)
@@ -1170,6 +1183,8 @@ class Orchestrator:
             await self.new_survivors(msg.get("count"), msg.get("mix"))
         elif kind == "recharge":
             self.recharge(d)
+        elif kind == "set_graphics":
+            await self.set_graphics(msg["preset"])
         elif kind == "set_drone_speed":
             await self.set_drone_speed(msg["speed"])
         elif kind == "set_agent_limits":
@@ -1311,6 +1326,7 @@ class Orchestrator:
             tr = [self.lonlat(e, n) for e, n in self.truth_en]
         return {"type": "state", "t": round(self.t_mission(), 2), "speed": self.clock.speed,
                 "drone_speed": self.drone_speed, "agent_limits": self.agent_limits, "agent": self.agent,
+                "graphics": self.graphics,
                 "mission": mission, "drones": drones, "survivors": surv, "options": dict(self.options),
                 "truth": tr}
 
