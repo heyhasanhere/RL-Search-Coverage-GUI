@@ -5,6 +5,7 @@ export const SPEEDS = [1, 4, 16];
 
 function label(info: ReplayInfo): string {
   const bits = [info.mode ?? "?", info.scenario ?? "?"];
+  if (info.recording) bits.unshift(info.recording);
   if (info.seed != null) bits.push(`seed ${info.seed}`);
   if (info.duration != null) bits.push(fmtTime(info.duration));
   if (info.n_videos) bits.push("3D");
@@ -12,6 +13,7 @@ function label(info: ReplayInfo): string {
 }
 
 interface Props {
+  /** The missions saved with the Record button. */
   list: ReplayInfo[];
   id: string;
   onPick: (id: string) => void;

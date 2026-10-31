@@ -200,6 +200,8 @@ export interface ReplayInfo {
   n_finds: number;
   /** Recorded 3D videos in a packed replay (runs/replays). */
   n_videos?: number;
+  /** The name of a packed replay (runs/replays/<name>), null for a plain mission log. */
+  recording?: string | null;
 }
 
 export interface ReplayDrone extends Partial<Omit<Drone, "id" | "name" | "state" | "pos" | "alt" | "heading">> {

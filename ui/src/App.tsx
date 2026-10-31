@@ -11,6 +11,7 @@ import OverlaysPanel from "./OverlaysPanel";
 import { SettingsMenu, useMissionSettings } from "./MissionSettings";
 import RecordedVideo from "./RecordedVideo";
 import ReplayControls from "./ReplayControls";
+import RecordButton from "./RecordButton";
 import OperatorLogin from "./OperatorLogin";
 import { FOLLOW_DEFAULT, useCameraViews } from "./useCameraViews";
 import { replayBeliefAt, replayEventsAt, replayPrior, replayStateAt } from "./replayState";
@@ -77,11 +78,15 @@ export default function App() {
   // ---------------------------------------------------------------- replay
   // One recorded mission shown in the live layout: the panels get the state,
   // belief and events rebuilt from the mission log at the slider time.
+  // Only the missions saved with the Record button are listed, not every mission in the server logs.
+  const sourceRows = useMemo(() => replay.list.filter((r) => r.recording), [replay.list]);
   useEffect(() => {
-    if (replayId || !replay.list.length) return;
-    const withVideo = replay.list.filter((r) => r.n_videos);
-    setReplayId((withVideo[withVideo.length - 1] ?? replay.list[replay.list.length - 1]).id);
-  }, [replay.list, replayId]);
+    if (sourceRows.some((r) => r.id === replayId)) return;
+    const withVideo = sourceRows.filter((r) => r.n_videos);
+    setReplayId((withVideo[withVideo.length - 1] ?? sourceRows[sourceRows.length - 1])?.id ?? "");
+    setT(0);
+    setPlaying(false);
+  }, [sourceRows, replayId]);
   const { load } = replay;
   useEffect(() => {
     if (isReplay && replayId) void load(replayId);
@@ -127,6 +132,14 @@ export default function App() {
     setT(0);
     setPlaying(false);
   }, []);
+
+  // A new recording: list it and pick it for the replay screen.
+  const { refresh: refreshReplays } = replay;
+  const onRecordSaved = useCallback(async (name: string) => {
+    const list = await refreshReplays();
+    const row = list?.find((r) => r.recording === name);
+    if (row) pickReplay(row.id);
+  }, [refreshReplays, pickReplay]);
 
   const onAreaChange = useCallback((p: LonLat[] | null, l: LonLat | null, r: Region[]) => {
     setPolygon(p);
@@ -293,6 +306,7 @@ export default function App() {
                 showTruth={showTruth} onShowTruth={setShowTruth} />
             )}
           </div>
+          {!isReplay && config && <RecordButton disabled={!!config.login_required && !config.operator} onSaved={onRecordSaved} />}
           {!isReplay && config?.login_required && <OperatorLogin live={live} />}
         </div>
       </header>
@@ -338,7 +352,7 @@ export default function App() {
               <>
                 {isReplay ? (
                   <ReplayControls
-                    list={replay.list} id={replayId} onPick={pickReplay} t={t} duration={duration}
+                    list={sourceRows} id={replayId} onPick={pickReplay} t={t} duration={duration}
                     playing={playing} speed={speed} onPlay={setPlaying} onSpeed={setSpeed}
                     onSeek={(v) => { setPlaying(false); setT(v); }} error={replay.error}
                   />

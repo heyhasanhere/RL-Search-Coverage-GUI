@@ -235,3 +235,11 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 .settings-menu .row { margin-top: 0; align-items: flex-end; }
 .settings-menu .row .field { flex: 1; }
 .prior-sub { font-size: 11px; color: var(--muted); border-left: 1px solid var(--line); padding-left: 8px; }
+
+/* Record button in the status bar */
+.record { display: flex; gap: 6px; align-items: center; }
+.record .err { margin-top: 0; }
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; margin-right: 2px; }
+button.rec-on { background: #7f1d1d; border-color: #b91c1c; color: #fff; }
+button.rec-on .rec-dot { animation: rec-blink 1s step-start infinite; }
+@keyframes rec-blink { 50% { opacity: 0; } }

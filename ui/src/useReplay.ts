@@ -16,10 +16,13 @@ export function useReplay() {
       const r = await fetch("api/replays");
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const js = await r.json();
-      setList(js.replays ?? []);
+      const rows: ReplayInfo[] = js.replays ?? [];
+      setList(rows);
       setError(null);
+      return rows;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return undefined;
     }
   }, []);
 
