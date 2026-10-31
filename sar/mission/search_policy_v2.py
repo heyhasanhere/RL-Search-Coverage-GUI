@@ -1,13 +1,10 @@
-"""M4 search modes for the orchestrator on env v2 (plan sections 8.3, 9.1).
+"""The `mcts` search mode for the orchestrator on env v2.
 
-Two modes on top of `sar.search.v2_service`:
-  mcts       `policy.plan(state, drone=i, hand=True)`: the hand value search
-             (hand prior plus greedy rollout), no network needed
-  rl_search  `policy.act(policy.observe(state))[i]`: the M4 network alone
+  mcts       `policy.plan(state, drone=i, hand=True)` on top of `sar.search.v2_service`:
+             the hand value search (hand prior plus greedy rollout), no network needed
 
 The env is built at the mission grid size (32, 64 or 96), so no padding is
-needed: the hand search is grid-agnostic and the network input is fixed size
-(31 x 31 crop, 32 x 32 pooled global view, 16 scalars).
+needed: the hand search is grid-agnostic.
 
 Altitude: the orchestrator's look model and the sim detector cover one cell at
 `MissionConfig.search_alt` (23 m, the v2 low level). The high level would look
@@ -17,9 +14,8 @@ every high-level action. Every decision is therefore a low-level segment and
 the returned altitude is `level_m[LOW]`.
 
 Separation is the v1 rule: slot i's segment must stay more than `min_sep`
-cells from every other active drone's current segment and cell. `rl_search`
-masks those actions before the argmax; `mcts` checks its pick afterwards and
-falls back to the greedy (hand prior) best legal action. If nothing but hold
+cells from every other active drone's current segment and cell. `mcts`
+checks its pick afterwards and falls back to the greedy (hand prior) best legal action. If nothing but hold
 is legal and the drone is too close to another, it escapes to the legal
 segment whose end is farthest from the others.
 """
@@ -36,29 +32,27 @@ import numpy as np
 from sar.config_v2 import LOW, PD_TABLE_PATH, EnvConfigV2, load_pd_table
 from sar.env.v2.grid_env_v2 import ACTIVE, AIRBORNE, LEFT, EnvStateV2, SearchEnvV2
 
-MODES_V2 = ("mcts", "rl_search")
+MODES_V2 = ("mcts",)
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CKPT_V2 = ROOT / "models/expert_iteration/final"
 
 _CACHE: dict = {}
 
 
-def get_policy_v2(g: int, ckpt=DEFAULT_CKPT_V2, n_slots: int = 3, seed: int = 0) -> "SearchPolicyV2Modes":
-    """One adapter per (grid, checkpoint) per process, so jit compiles are shared."""
-    k = (int(g), str(ckpt), int(n_slots))
+def get_policy_v2(g: int, n_slots: int = 3, seed: int = 0) -> "SearchPolicyV2Modes":
+    """One adapter per grid per process, so jit compiles are shared."""
+    k = (int(g), int(n_slots))
     if k not in _CACHE:
-        _CACHE[k] = SearchPolicyV2Modes(g, ckpt, n_slots=n_slots, seed=seed)
+        _CACHE[k] = SearchPolicyV2Modes(g, n_slots=n_slots, seed=seed)
     return _CACHE[k]
 
 
 class SearchPolicyV2Modes:
     """Same `decide` inputs as `SearchPolicy`; returns (action, cells, alt_m)."""
 
-    def __init__(self, g: int, ckpt=DEFAULT_CKPT_V2, n_slots: int = 3, seed: int = 0,
+    def __init__(self, g: int, n_slots: int = 3, seed: int = 0,
                  sims: int = 32, search_depth: int = 8):
         self.cfg = EnvConfigV2(grid=g, n_agents=n_slots).with_grid(g)
         self.g, self.n = g, n_slots
-        self.ckpt = Path(ckpt) if ckpt is not None else None
         self.seed, self.sims, self.depth = seed, sims, search_depth
         self._env = None
         self._pol = None
@@ -67,13 +61,6 @@ class SearchPolicyV2Modes:
         self.timing: list = []      # (mode, seconds) per real decision
 
     # ------------------------------------------------------------- lazy setup
-    @property
-    def has_net(self) -> bool:
-        return self.ckpt is not None and (self.ckpt / "params.msgpack").exists()
-
-    def available(self, mode) -> bool:
-        return mode == "mcts" or self.has_net
-
     @property
     def env(self) -> SearchEnvV2:
         if self._env is None:
@@ -90,18 +77,12 @@ class SearchPolicyV2Modes:
         return self._env
 
     def policy(self):
-        """Load on first use, CPU only. Without the checkpoint, mcts still works."""
+        """The hand search, built on first use, CPU only."""
         if self._pol is None:
             from sar.search import v2_service as S
-            env = self.env
-            if self.has_net:
-                self._pol = S.load_policy(self.ckpt, env=env, sims=self.sims,
-                                          search_depth=self.depth, cpu=True, seed=self.seed)
-            else:
-                dev = jax.devices("cpu")[0]
-                self._pol = S.SearchPolicyV2(None, None, {}, env, sims=self.sims,
-                                             search_depth=self.depth, seed=self.seed)
-                self._pol.device = dev
+            self._pol = S.SearchPolicyV2(None, None, {}, self.env, sims=self.sims,
+                                         search_depth=self.depth, seed=self.seed)
+            self._pol.device = jax.devices("cpu")[0]
         return self._pol
 
     def warmup(self, mode, state=None):
@@ -111,12 +92,9 @@ class SearchPolicyV2Modes:
         pol = self.policy()
         if state is None:
             state = self._sample_state()
-        if mode == "mcts":
-            for i in range(self.n):
-                pol.plan(state, drone=i, hand=True)
-            self._greedy_fn()(state)
-        else:
-            pol.act(pol.observe(state))
+        for i in range(self.n):
+            pol.plan(state, drone=i, hand=True)
+        self._greedy_fn()(state)
         self._warm.add(mode)
 
     def _sample_state(self):
@@ -201,18 +179,11 @@ class SearchPolicyV2Modes:
         self.warmup(mode, state)
         pol = self.policy()
         extra = self.separation_mask(agents, i)
-        if mode == "rl_search":
-            obs = dict(pol.observe(state))
-            am = np.array(obs["action_mask"])
-            am[i] &= extra
-            obs["action_mask"] = am
-            a = int(pol.act(obs)[i])
-        else:
-            a = int(pol.plan(state, drone=i, hand=True))
-            if not extra[a]:
-                lg, legal = self._greedy_fn()(state)
-                ok = np.asarray(legal)[i] & extra
-                a = int(np.argmax(np.where(ok, np.asarray(lg)[i], -np.inf)))
+        a = int(pol.plan(state, drone=i, hand=True))
+        if not extra[a]:
+            lg, legal = self._greedy_fn()(state)
+            ok = np.asarray(legal)[i] & extra
+            a = int(np.argmax(np.where(ok, np.asarray(lg)[i], -np.inf)))
         if self.base_of[a] == env.a0 - 1:           # hold at either level
             a = self._escape(state, agents, i)
         self.timing.append((mode, time.perf_counter() - t0))

@@ -53,7 +53,7 @@ def log_dir(tmp_path):
     d = tmp_path / "runs" / "mission"
     d.mkdir(parents=True)
     synthetic_log(d / "alpha.jsonl", mode="mcts", seed=7)
-    synthetic_log(d / "beta.jsonl", mode="planner", seed=7)
+    synthetic_log(d / "beta.jsonl", mode="greedy", seed=7)
     return tmp_path
 
 
@@ -79,7 +79,7 @@ def test_replays_lists_logs(client, log_dir):
     assert ids == {"alpha", "beta"}
     by_id = {x["id"]: x for x in rows}
     assert by_id["alpha"]["mode"] == "mcts"
-    assert by_id["beta"]["mode"] == "planner"
+    assert by_id["beta"]["mode"] == "greedy"
     assert by_id["alpha"]["seed"] == 7
     assert by_id["alpha"]["scenario"] == "wilderness"
     assert by_id["alpha"]["duration"] == 2.0

@@ -62,7 +62,7 @@ def test_search_separation_and_finds():
         await orch.start()
         f = orch.frame
         truth = np.array([[100.0, 120.0], [-150.0, -60.0]])
-        orch.start_mission(polygon=square(), mode="planner", n_search=2, expected_survivors=2, truth_en=truth)
+        orch.start_mission(polygon=square(), mode="greedy", n_search=2, expected_survivors=2, truth_en=truth)
         min_d = 1e9
         t0 = orch.now()
         while orch.now() - t0 < 900:
@@ -84,7 +84,7 @@ def test_reset_numbers_survivors_from_one():
     async def main():
         orch = make(fp=1.0)                    # every look reports a candidate: survivors appear at once
         await orch.start()
-        start = dict(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
+        start = dict(polygon=square(), mode="greedy", n_search=2, expected_survivors=2)
         orch.start_mission(**start)
         assert await run_until(orch, lambda: orch.survivors, 300)
         assert min(orch.survivors) == 1
@@ -109,7 +109,7 @@ def test_new_survivors_resets_then_lays_out():
         with pytest.raises(ValueError):           # the kinematic backend has no layouts
             await orch.command({"type": "new_survivors"})
         orch.on_new_survivors = layout
-        orch.start_mission(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
+        orch.start_mission(polygon=square(), mode="greedy", n_search=2, expected_survivors=2)
         assert await run_until(orch, lambda: orch.survivors, 300)
         await orch.command({"type": "new_survivors", "count": 30})
         assert calls == [(None, 30, None)] and orch.mission is None and not orch.survivors
@@ -130,7 +130,7 @@ def test_continue_keeps_search_state():
         await orch.start()
         with pytest.raises(ValueError):
             await orch.command({"type": "continue_mission"})
-        orch.start_mission(polygon=square(), mode="planner", n_search=2, expected_survivors=2)
+        orch.start_mission(polygon=square(), mode="greedy", n_search=2, expected_survivors=2)
         assert await run_until(orch, lambda: orch.survivors and orch.metrics["looks"] > 20, 300)
         with pytest.raises(ValueError):           # still running
             await orch.command({"type": "continue_mission"})
@@ -248,7 +248,7 @@ def test_battery_rule():
     async def main():
         orch = make(battery_s=400.0)
         await orch.start()
-        orch.start_mission(polygon=square(), mode="planner", n_search=1, expected_survivors=1)
+        orch.start_mission(polygon=square(), mode="greedy", n_search=1, expected_survivors=1)
         assert await run_until(orch, lambda: orch.drones[0].state == "RETURNING", 500)
         d = orch.drones[0]
         dist = float(np.hypot(*(d.vehicle.tel.pos[:2] - d.vehicle.home[:2])))
@@ -266,7 +266,7 @@ def test_operator_dispatch_and_standby_no_drain():
         orch = make(fp=0.0, footprint_m=60.0)
         await orch.start()
         truth = np.array([[60.0, 60.0]])
-        orch.start_mission(polygon=square(), mode="planner", n_search=1, expected_survivors=1, truth_en=truth,
+        orch.start_mission(polygon=square(), mode="greedy", n_search=1, expected_survivors=1, truth_en=truth,
                            options={"auto_dispatch": False})
         r = orch.drones[2]
         b0 = r.battery_s
@@ -347,7 +347,7 @@ def test_bad_commands_raise():
         orch = make()
         await orch.start()
         with pytest.raises(ValueError):
-            orch.start_mission(polygon=square(0.05), mode="planner")      # too large
+            orch.start_mission(polygon=square(0.05), mode="greedy")      # too large
         with pytest.raises(ValueError):
             orch.start_mission(polygon=square(), mode="nope")
         with pytest.raises(ValueError):

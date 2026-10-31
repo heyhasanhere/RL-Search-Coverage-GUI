@@ -11,9 +11,7 @@ const OPTION_LABELS: [keyof Options, string][] = [
 const MODE_HINTS: Record<string, string> = {
   rl: "Trained MAPPO policy (main method)",
   rl_unity: "A trained FloodUAV agent (PPO, TRPO or DQN) flies D1; other search drones use rl",
-  rl_search: "Learned policy with tree search (main method)",
   mcts: "MCTS planner (strongest baseline)",
-  planner: "Two-segment look-ahead planner",
   greedy: "Highest immediate expected detections",
   lawnmower: "Boustrophedon sweep (baseline)",
 };

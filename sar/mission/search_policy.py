@@ -1,7 +1,7 @@
 """Search policy inference on CPU for the orchestrator (plan sections 4.1, 5.5).
 
 The orchestrator keeps its own world model. For each decision it builds a
-JAX EnvState from that model and runs the chosen method (RL, planner, greedy,
+JAX EnvState from that model and runs the chosen method (RL, greedy or
 lawnmower) for one drone, using the predicted position at the end of the
 drone's current segment. Segments that pass near another drone's current
 segment are masked (plan 4.6).
@@ -21,8 +21,8 @@ from sar.env.grid_env import ACTIVE, LEFT, EnvState, SearchEnv
 from sar.mission.search_policy_v2 import MODES_V2
 from sar.train.networks import Actor
 
-V1_MODES = ("rl", "planner", "greedy", "lawnmower")
-# rl first: the UI and start_mission default to the trained RL policy; mcts stays as the hand-search comparison; v2 modes run in search_policy_v2
+V1_MODES = ("rl", "greedy", "lawnmower")
+# rl first: the UI and start_mission default to the trained RL policy; mcts runs in search_policy_v2
 MODES = (*V1_MODES, *MODES_V2)
 GRIDS = (32, 64, 96)
 

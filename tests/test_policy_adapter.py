@@ -13,7 +13,7 @@ def world(g=32):
     return mask, belief
 
 
-@pytest.mark.parametrize("mode", ["planner", "greedy", "lawnmower"])
+@pytest.mark.parametrize("mode", ["greedy", "lawnmower"])
 def test_decide_returns_contiguous_segment(mode):
     pol = SearchPolicy(32, None)
     mask, belief = world()

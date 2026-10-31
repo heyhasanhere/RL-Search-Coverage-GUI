@@ -1,4 +1,4 @@
-"""M4 search modes in the orchestrator: `mcts` (hand search) and `rl_search` (network).
+"""The `mcts` search mode (hand search) in the orchestrator.
 
 Short kinematic missions (plan section 13 pattern): drones leave their entry
 cell, every planned segment stays inside the area, and the two search drones
@@ -8,21 +8,16 @@ keep the separation rule.
 import asyncio
 
 import numpy as np
-import pytest
 
 from sar.mission.search_policy import MODES, AgentView
 from sar.mission.search_policy_v2 import MODES_V2, get_policy_v2
 from test_mission import make, square
 
-NEED_NET = pytest.mark.skipif(not get_policy_v2(32).has_net, reason="M4 checkpoint missing")
-
-
 def test_modes_listed():
     assert set(MODES_V2) <= set(MODES)
 
 
-@pytest.mark.parametrize("mode", ["mcts", pytest.param("rl_search", marks=NEED_NET)])
-def test_mission_v2_mode(mode):
+def test_mission_v2_mode(mode="mcts"):
     async def main():
         orch = make()
         await orch.start()
@@ -69,8 +64,7 @@ def test_mission_v2_mode(mode):
     asyncio.run(main())
 
 
-@pytest.mark.parametrize("mode", ["mcts", pytest.param("rl_search", marks=NEED_NET)])
-def test_v2_separation_and_timing(mode):
+def test_v2_separation_and_timing(mode="mcts"):
     """Another drone's segment blocks nearby actions; decisions stay under 200 ms."""
     import time
 

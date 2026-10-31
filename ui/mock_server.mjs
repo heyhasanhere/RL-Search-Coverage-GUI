@@ -15,7 +15,7 @@ const mPerDegLon = M_PER_DEG_LAT * Math.cos((HOME[1] * Math.PI) / 180);
 
 const config = {
   home: HOME, cell_m: 30.0, max_grid: 96, max_area_km2: 8.29,
-  modes: ["rl", "rl_search", "mcts", "planner", "greedy", "lawnmower"],
+  modes: ["rl", "mcts", "greedy", "lawnmower"],
   drones: [
     { id: 0, name: "S1", role: "search" },
     { id: 1, name: "S2", role: "search" },

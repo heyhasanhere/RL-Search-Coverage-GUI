@@ -1,7 +1,7 @@
 """Mission replay: turn orchestrator mission logs into a scrubbable time series.
 
 Plan section 11 (step 7) and the M7 row: the operator compares two methods
-(for example `mcts` against `planner`) on the same scenario and seed, in two
+(for example `mcts` against `greedy`) on the same scenario and seed, in two
 map panes side by side, with one shared time slider.
 
 The server exposes two endpoints (docs/PROTOCOL.md section 6):

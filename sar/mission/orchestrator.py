@@ -260,7 +260,6 @@ class Orchestrator:
                                water_level_m=water_level_m)
         if mode not in self.modes:
             raise ValueError(f"mode must be one of {self.modes}")
-        self._check_v2_mode(mode)
         if mask is not None:
             g = mask.shape[0]
             grid = AreaGrid.from_mask(self.frame, mask, cfg.cell_m, center_en=(0.0, 0.0))
@@ -280,8 +279,6 @@ class Orchestrator:
         # compile every mode now: a compile during flight would stall setpoint streaming
         for md in MODES:
             if md == "rl" and self.ckpt_root is None:
-                continue
-            if md in MODES_V2 and not get_policy_v2(g).available(md):
                 continue
             self.mission.mode = md
             self._decide(self.drones[0], (grid.g // 2, grid.g // 2), warm=True)
@@ -482,8 +479,7 @@ class Orchestrator:
                 if md == "rl" and self.ckpt_root is None:
                     continue
                 if md in MODES_V2:
-                    if get_policy_v2(g).available(md):
-                        get_policy_v2(g).decide(md, 0, *args)
+                    get_policy_v2(g).decide(md, 0, *args)
                 else:
                     pol.decide(md, 0, *args)
             self._warm_grids.add(g)
@@ -496,17 +492,13 @@ class Orchestrator:
         t_frac = min(self.t_mission() / (self.policy.cfg.max_steps * seg_time), 1.0)
         slot = d.id if d.id < self.policy.n else 0
         args = (m.belief, m.grid.mask, m.looks, agents, m.home_cell, self.cfg.pd, m.belief0, t_frac)
-        if mode in MODES_V2:         # M4 search on env v2: action, cells and the level's altitude
+        if mode in MODES_V2:         # mcts on env v2: action, cells and the level's altitude
             a, cells, alt = get_policy_v2(m.grid.g).decide(mode, slot, *args)
         else:
             (a, cells), alt = self.policy.decide(mode, slot, *args), self.cfg.search_alt
         if not warm:
             self.log("decide", drone=d.id, mode=mode, cell=list(from_cell), action=a)
         return a, cells, alt
-
-    def _check_v2_mode(self, mode):
-        if mode in MODES_V2 and not get_policy_v2(32).available(mode):
-            raise ValueError(f"mode {mode} needs the expert-iteration checkpoint (models/expert_iteration/final)")
 
     def _heading_of(self, a):
         if self.mission.mode in MODES_V2:
@@ -1194,13 +1186,12 @@ class Orchestrator:
         elif kind == "set_mode":
             if msg["mode"] not in self.modes:
                 raise ValueError(f"mode must be one of {self.modes}")
-            self._check_v2_mode(msg["mode"])
             if msg["mode"] in MODES_V2:    # compiled at mission start; this is a no-op then
                 get_policy_v2(self.mission.grid.g).warmup(msg["mode"])
             old, self.mission.mode = self.mission.mode, msg["mode"]
             self.event(f"search mode: {msg['mode']}")
             if (old == AGENT_MODE) != (msg["mode"] == AGENT_MODE):
-                # the agent takes over a searching drone, or hands it back to the planner
+                # the agent takes over a searching drone, or hands it back to the search mode
                 for o in self.drones:
                     if o.state == "SEARCH" and getattr(o.vehicle, "agent_capable", False):
                         self._set_task(o, self._search(o), "SEARCH", "search mode changed")
